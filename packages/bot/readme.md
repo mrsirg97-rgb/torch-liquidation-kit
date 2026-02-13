@@ -1,8 +1,8 @@
-# torch-liquidation-bot v3.0.0 (Vault Mode)
+# torch-liquidation-bot v3.0.1 (Vault Mode)
 
 Vault-based liquidation bot for [Torch Market](https://torch.market) on Solana. Generates an agent keypair in-process — no user wallet required. All operations route through a Torch Vault.
 
-> **v3.0.0 Breaking Change:** The bot now operates through the torchsdk v2.1.0 vault model. It generates a disposable agent keypair at startup, scans for underwater loan positions, and executes liquidations. The user never provides a wallet — only a vault creator pubkey and an RPC endpoint.
+> **v3.0.0+ Breaking Change:** The bot now operates through the torchsdk v3.2.3+ vault model. It generates a disposable agent keypair at startup, scans for underwater loan positions, and executes liquidations. The user never provides a wallet — only a vault creator pubkey and an RPC endpoint.
 
 ## Install
 
@@ -14,7 +14,7 @@ npm install torch-liquidation-bot
 
 ```bash
 # 1. start the bot — it prints its agent wallet on startup
-VAULT_CREATOR=<your-vault-creator-pubkey> RPC_URL=<rpc> npx torch-liquidation-bot
+VAULT_CREATOR=<your-vault-creator-pubkey> SOLANA_RPC_URL=<rpc> npx torch-liquidation-bot
 
 # 2. link the printed agent wallet to your vault (one-time, from your authority wallet)
 #    the bot will print the exact instructions if the wallet is not yet linked
@@ -42,14 +42,15 @@ All value flows through the vault. The agent wallet is a stateless controller.
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `RPC_URL` | yes | -- | Solana RPC endpoint |
+| `SOLANA_RPC_URL` | yes | -- | Solana RPC endpoint (fallback: `RPC_URL`) |
 | `VAULT_CREATOR` | yes | -- | Vault creator pubkey (identifies which vault to use) |
+| `SOLANA_PRIVATE_KEY` | no | -- | Disposable controller keypair (base58 or JSON byte array). If omitted, generates fresh keypair on startup |
 | `SCAN_INTERVAL_MS` | no | `30000` | Milliseconds between scan cycles (min 5000) |
 | `LOG_LEVEL` | no | `info` | `debug`, `info`, `warn`, `error` |
 
 ## Vault Setup
 
-The bot uses the torchsdk v2.1.0 vault model:
+The bot uses the torchsdk v3.2.3 vault model:
 
 ```
 User (hardware wallet) → Creates vault, deposits SOL
@@ -81,7 +82,8 @@ const connection = new Connection('<rpc>', 'confirmed')
 const agent = Keypair.generate()
 
 // verify vault and link
-const vault = await getVault(connection, '<vault-creator-pubkey>')
+const vaultCreator = '<vault-creator-pubkey>'
+const vault = await getVault(connection, vaultCreator)
 const link = await getVaultForWallet(connection, agent.publicKey.toBase58())
 
 // scan and liquidate
@@ -100,6 +102,7 @@ for (const token of tokens) {
       mint: token.mint,
       liquidator: agent.publicKey.toBase58(),
       borrower: holder.address,
+      vault: vaultCreator,
     })
     transaction.sign(agent)
     const sig = await connection.sendRawTransaction(transaction.serialize())
@@ -113,7 +116,7 @@ for (const token of tokens) {
 ```
 src/
 ├── types.ts    — BotConfig interface
-├── config.ts   — loadConfig() (RPC_URL, VAULT_CREATOR, SCAN_INTERVAL_MS, LOG_LEVEL)
+├── config.ts   — loadConfig() (SOLANA_RPC_URL, VAULT_CREATOR, SOLANA_PRIVATE_KEY, SCAN_INTERVAL_MS, LOG_LEVEL)
 ├── utils.ts    — sol(), bpsToPercent(), createLogger()
 └── index.ts    — vault-based liquidation loop
 ```
@@ -139,19 +142,18 @@ pnpm test
 
 ## Security
 
-- Agent keypair generated in-process — never serialized, never leaves the process
-- No user wallet or private key imported from environment
+- Agent keypair generated in-process with `Keypair.generate()` (or loaded from optional `SOLANA_PRIVATE_KEY`)
 - Vault model: agent is a stateless controller, all value stays in the vault
 - Authority can unlink the agent wallet instantly via `buildUnlinkWalletTransaction()`
-- Outbound connections: Solana RPC only
-- Minimal dependencies: `@solana/web3.js` + `torchsdk`
+- Minimal dependencies: `@solana/web3.js` + `torchsdk` -- both pinned to exact versions
 - No post-install hooks, no remote code fetching
+- SDK contacts three external services (SAID Protocol, CoinGecko, Irys) -- all read-only, no credentials sent
 
 ## Links
 
 - [torchsdk](https://github.com/mrsirg97-rgb/torchsdk) -- the SDK powering this bot
 - [Torch Market](https://torch.market) -- the protocol
-- [ClawHub](https://clawhub.ai/mrsirg97-rgb/torchliquidationbot) -- skill registry
+- [ClawHub](https://clawhub.ai/mrsirg97-rgb/torch-liquidation-bot) -- skill registry
 
 ## License
 

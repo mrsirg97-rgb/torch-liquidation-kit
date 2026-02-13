@@ -1,17 +1,19 @@
 ---
 name: torch-liquidation-bot
-version: "3.0.0"
+version: "3.0.1"
 description: Autonomous vault-based liquidation keeper for Torch Market lending on Solana. Scans all migrated tokens for underwater loan positions (LTV > 65%), builds and executes liquidation transactions through a Torch Vault, and collects a 10% collateral bonus. The agent keypair is generated in-process -- disposable, holds nothing of value. All SOL and collateral tokens route through the vault. The human principal creates the vault, funds it, links the agent, and retains full control. Built on torchsdk v3.2.3 and the Torch Market protocol.
 license: MIT
 disable-model-invocation: true
 requires:
   env:
     - SOLANA_RPC_URL
+    - VAULT_CREATOR
 metadata:
   openclaw:
     requires:
       env:
         - SOLANA_RPC_URL
+        - VAULT_CREATOR
     primaryEnv: SOLANA_RPC_URL
     install:
       - id: npm-torch-liquidation-bot
@@ -20,7 +22,7 @@ metadata:
         flags: []
         label: "Install Torch Liquidation Bot (npm, optional -- SDK is bundled in lib/torchsdk/ and bot source is bundled under lib/kit on clawhub)"
   author: torch-market
-  version: "3.0.0"
+  version: "3.0.1"
   clawhub: https://clawhub.ai/mrsirg97-rgb/torch-liquidation-bot
   kit-source: https://github.com/mrsirg97-rgb/torch-liquidation-kit
   website: https://torch.market
@@ -143,7 +145,7 @@ If the agent keypair is compromised, the attacker gets dust and vault access tha
 ### 1. Install
 
 ```bash
-npm install torch-liquidation-bot@3.0.0
+npm install torch-liquidation-bot@3.0.1
 ```
 
 Or use the bundled source from ClawHub — the Torch SDK is included in `lib/torchsdk/` and the bot source is in `lib/kit/`.
@@ -179,7 +181,7 @@ const { transaction: depositTx } = await buildDepositVaultTransaction(connection
 ### 3. Run the Bot
 
 ```bash
-VAULT_CREATOR=<your-vault-creator-pubkey> RPC_URL=<rpc-url> npx torch-liquidation-bot
+VAULT_CREATOR=<your-vault-creator-pubkey> SOLANA_RPC_URL=<rpc-url> npx torch-liquidation-bot
 ```
 
 On first run, the bot prints the agent keypair and instructions to link it. Link it from your authority wallet, then restart.
@@ -188,8 +190,9 @@ On first run, the bot prints the agent keypair and instructions to link it. Link
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `RPC_URL` | **Yes** | -- | Solana RPC endpoint (HTTPS) |
+| `SOLANA_RPC_URL` | **Yes** | -- | Solana RPC endpoint (HTTPS). Fallback: `RPC_URL` |
 | `VAULT_CREATOR` | **Yes** | -- | Vault creator pubkey |
+| `SOLANA_PRIVATE_KEY` | No | -- | Disposable controller keypair (base58 or JSON byte array). If omitted, generates fresh keypair on startup (recommended) |
 | `SCAN_INTERVAL_MS` | No | `30000` | Milliseconds between scan cycles (min 5000) |
 | `LOG_LEVEL` | No | `info` | `debug`, `info`, `warn`, `error` |
 
@@ -200,7 +203,7 @@ On first run, the bot prints the agent keypair and instructions to link it. Link
 ```
 packages/bot/src/
 ├── index.ts    — entry point: keypair generation, vault verification, scan loop
-├── config.ts   — loadConfig(): validates RPC_URL, VAULT_CREATOR, SCAN_INTERVAL_MS, LOG_LEVEL
+├── config.ts   — loadConfig(): validates SOLANA_RPC_URL, VAULT_CREATOR, SCAN_INTERVAL_MS, LOG_LEVEL
 ├── types.ts    — BotConfig, LogLevel interfaces
 └── utils.ts    — sol(), bpsToPercent(), createLogger()
 ```

@@ -1,18 +1,20 @@
-# torch-liquidation-bot v3.0.0
+# torch-liquidation-bot v3.0.1 (Vault Mode)
 
-Autonomous vault-based liquidation keeper for [Torch Market](https://torch.market) lending on Solana. Generates an agent keypair in-process -- no user wallet required. All operations route through a Torch Vault.
+Vault-based liquidation bot for [Torch Market](https://torch.market) on Solana. Generates an agent keypair in-process — no user wallet required. All operations route through a Torch Vault.
+
+> **v3.0.0+ Breaking Change:** The bot now operates through the torchsdk v3.2.3+ vault model. It generates a disposable agent keypair at startup, scans for underwater loan positions, and executes liquidations. The user never provides a wallet — only a vault creator pubkey and an RPC endpoint.
 
 ## Install
 
 ```bash
-npm install torch-liquidation-bot@3.0.0
+npm install torch-liquidation-bot
 ```
 
 ## Quick Start
 
 ```bash
 # 1. start the bot — it prints its agent wallet on startup
-VAULT_CREATOR=<your-vault-creator-pubkey> RPC_URL=<rpc> npx torch-liquidation-bot
+VAULT_CREATOR=<your-vault-creator-pubkey> SOLANA_RPC_URL=<rpc> npx torch-liquidation-bot
 
 # 2. link the printed agent wallet to your vault (one-time, from your authority wallet)
 #    the bot will print the exact instructions if the wallet is not yet linked
@@ -22,7 +24,7 @@ VAULT_CREATOR=<your-vault-creator-pubkey> RPC_URL=<rpc> npx torch-liquidation-bo
 
 ## What It Does
 
-Every migrated token on Torch has a built-in lending market. Borrowers lock tokens as collateral and borrow SOL from the community treasury (up to 50% LTV, 2% weekly interest). When a loan's LTV crosses 65%, it becomes liquidatable. Anyone can liquidate it and collect a **10% bonus** on the collateral value.
+Every migrated token on Torch has a built-in lending market. Borrowers lock tokens as collateral and borrow SOL. When a position's LTV exceeds the liquidation threshold, anyone can liquidate it and earn the liquidation bonus.
 
 This bot:
 
@@ -30,37 +32,36 @@ This bot:
 2. Verifies the vault exists and the agent wallet is linked
 3. Scans migrated tokens for active loans
 4. Checks each borrower's position health via `getLoanPosition()`
-5. Executes `buildLiquidateTransaction()` with `vault` param for any position with `health === 'liquidatable'`
+5. Executes `buildLiquidateTransaction()` for any position with `health === 'liquidatable'`
 6. Confirms the transaction via `confirmTransaction()`
 7. Repeats on a configurable interval
 
-All value flows through the vault. The agent wallet is a disposable controller that holds nothing.
+All value flows through the vault. The agent wallet is a stateless controller.
 
 ## Configuration
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `RPC_URL` | yes | -- | Solana RPC endpoint (HTTPS) |
+| `SOLANA_RPC_URL` | yes | -- | Solana RPC endpoint (fallback: `RPC_URL`) |
 | `VAULT_CREATOR` | yes | -- | Vault creator pubkey (identifies which vault to use) |
+| `SOLANA_PRIVATE_KEY` | no | -- | Disposable controller keypair (base58 or JSON byte array). If omitted, generates fresh keypair on startup |
 | `SCAN_INTERVAL_MS` | no | `30000` | Milliseconds between scan cycles (min 5000) |
 | `LOG_LEVEL` | no | `info` | `debug`, `info`, `warn`, `error` |
 
 ## Vault Setup
 
-The bot uses the Torch Vault model via torchsdk v3.2.3:
+The bot uses the torchsdk v3.2.3 vault model:
 
 ```
-Human Principal (hardware wallet)
-  → Creates vault, deposits SOL, links bot's agent wallet
-
-Bot (disposable agent keypair, ~0.01 SOL for gas)
-  → Scans for liquidatable positions
-  → Executes liquidations via vault (SOL from vault, collateral to vault ATA)
-
-Human Principal (retains full control)
-  → Withdraws SOL and collateral tokens at any time (authority only)
-  → Unlinks agent wallet instantly if needed
+User (hardware wallet) → Creates vault, deposits SOL
+                       → Links bot's agent wallet
+Bot  (disposable)      → Scans for liquidatable positions
+                       → Executes liquidations using vault funds
+                       → All proceeds return to vault
+User                   → Withdraws from vault (authority only)
 ```
+
+The agent wallet needs minimal SOL for gas (~0.01 SOL). All liquidation value flows through the vault.
 
 ## Programmatic Usage
 
@@ -79,9 +80,9 @@ import {
 
 const connection = new Connection('<rpc>', 'confirmed')
 const agent = Keypair.generate()
-const vaultCreator = '<vault-creator-pubkey>'
 
 // verify vault and link
+const vaultCreator = '<vault-creator-pubkey>'
 const vault = await getVault(connection, vaultCreator)
 const link = await getVaultForWallet(connection, agent.publicKey.toBase58())
 
@@ -113,11 +114,11 @@ for (const token of tokens) {
 ## Architecture
 
 ```
-packages/bot/src/
-├── index.ts    — entry point: keypair generation, vault verification, scan loop
-├── config.ts   — loadConfig(): validates RPC_URL, VAULT_CREATOR, SCAN_INTERVAL_MS, LOG_LEVEL
-├── types.ts    — BotConfig, LogLevel interfaces
-└── utils.ts    — sol(), bpsToPercent(), createLogger()
+src/
+├── types.ts    — BotConfig interface
+├── config.ts   — loadConfig() (SOLANA_RPC_URL, VAULT_CREATOR, SOLANA_PRIVATE_KEY, SCAN_INTERVAL_MS, LOG_LEVEL)
+├── utils.ts    — sol(), bpsToPercent(), createLogger()
+└── index.ts    — vault-based liquidation loop
 ```
 
 ## Lending Parameters
@@ -125,10 +126,10 @@ packages/bot/src/
 | Parameter | Value |
 |-----------|-------|
 | Max LTV | 50% |
-| Liquidation Threshold | 65% LTV |
-| Interest Rate | 2% per epoch (~7 days) |
-| Liquidation Bonus | 10% of collateral |
-| Min Borrow | 0.1 SOL |
+| Liquidation threshold | 65% LTV |
+| Interest rate | 2% per epoch (~7 days) |
+| Liquidation bonus | 10% of collateral |
+| Min borrow | 0.1 SOL |
 
 ## Testing
 
@@ -139,13 +140,10 @@ surfpool start --network mainnet --no-tui
 pnpm test
 ```
 
-**Result:** 7 passed, 1 informational (Surfpool RPC limitation on `getTokenLargestAccounts` -- works on mainnet).
-
 ## Security
 
-- Agent keypair generated in-process with `Keypair.generate()` -- never serialized, never leaves the process
-- No user wallet or private key imported from environment
-- Vault model: agent is a disposable controller, all value stays in the vault
+- Agent keypair generated in-process with `Keypair.generate()` (or loaded from optional `SOLANA_PRIVATE_KEY`)
+- Vault model: agent is a stateless controller, all value stays in the vault
 - Authority can unlink the agent wallet instantly via `buildUnlinkWalletTransaction()`
 - Minimal dependencies: `@solana/web3.js` + `torchsdk` -- both pinned to exact versions
 - No post-install hooks, no remote code fetching
@@ -161,13 +159,11 @@ The SDK makes outbound HTTPS requests to three external services beyond the Sola
 | **CoinGecko** (`api.coingecko.com`) | SOL/USD price for display | Token queries with USD pricing |
 | **Irys Gateway** (`gateway.irys.xyz`) | Token metadata fallback (name, symbol, image) | `getToken()` when on-chain metadata URI points to Irys |
 
-No credentials are sent to these services. All requests are read-only GET/POST. If any service is unreachable, the SDK degrades gracefully. No private key material is ever transmitted to any external endpoint.
-
-See the full [Security Audit](clawhub/audit.md) and [SKILL.md](clawhub/SKILL.md) for threat model and supply chain verification.
+No credentials are sent to these services. All requests are read-only GET/POST. If any service is unreachable, the SDK degrades gracefully.
 
 ## Links
 
-- [torchsdk](https://github.com/mrsirg97-rgb/torchsdk) -- the SDK powering this bot (v3.2.3)
+- [torchsdk](https://github.com/mrsirg97-rgb/torchsdk) -- the SDK powering this bot
 - [Torch Market](https://torch.market) -- the protocol
 - [ClawHub](https://clawhub.ai/mrsirg97-rgb/torch-liquidation-bot) -- skill registry
 

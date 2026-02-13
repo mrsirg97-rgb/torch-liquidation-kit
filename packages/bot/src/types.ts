@@ -7,6 +7,7 @@ export type LogLevel = 'debug' | 'info' | 'warn' | 'error'
 export interface BotConfig {
   rpcUrl: string
   vaultCreator: string
+  privateKey: string | null
   scanIntervalMs: number
   logLevel: LogLevel
 }

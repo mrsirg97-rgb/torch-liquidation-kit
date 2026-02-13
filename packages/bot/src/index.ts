@@ -2,15 +2,16 @@
 /**
  * torch-liquidation-bot — vault-based liquidation bot.
  *
- * generates an agent keypair in-process. all operations route through
- * a torch vault identified by VAULT_CREATOR. the user never provides a wallet.
+ * generates an agent keypair in-process (or uses SOLANA_PRIVATE_KEY if provided).
+ * all operations route through a torch vault identified by VAULT_CREATOR.
  *
  * usage:
- *   VAULT_CREATOR=<pubkey> RPC_URL=<rpc> npx tsx src/index.ts
+ *   VAULT_CREATOR=<pubkey> SOLANA_RPC_URL=<rpc> npx tsx src/index.ts
  *
  * env:
- *   RPC_URL           — solana RPC endpoint (required)
+ *   SOLANA_RPC_URL    — solana RPC endpoint (required, fallback: RPC_URL)
  *   VAULT_CREATOR     — vault creator pubkey (required)
+ *   SOLANA_PRIVATE_KEY — disposable controller keypair, base58 (optional)
  *   SCAN_INTERVAL_MS  — ms between scan cycles (default 30000, min 5000)
  *   LOG_LEVEL         — debug | info | warn | error (default info)
  */
@@ -29,13 +30,7 @@ import {
   type LoanPositionInfo,
 } from 'torchsdk'
 import { loadConfig } from './config'
-import { sol, bpsToPercent, createLogger } from './utils'
-
-// ---------------------------------------------------------------------------
-// bootstrap — generate agent keypair in-process
-// ---------------------------------------------------------------------------
-
-const agentKeypair = Keypair.generate()
+import { sol, bpsToPercent, createLogger, decodeBase58 } from './utils'
 
 // ---------------------------------------------------------------------------
 // scan & liquidate
@@ -45,6 +40,7 @@ const scanAndLiquidate = async (
   connection: Connection,
   log: ReturnType<typeof createLogger>,
   vaultCreator: string,
+  agentKeypair: Keypair,
 ) => {
   const { tokens } = await getTokens(connection, {
     status: 'migrated',
@@ -137,6 +133,27 @@ const main = async () => {
   const log = createLogger(config.logLevel)
   const connection = new Connection(config.rpcUrl, 'confirmed')
 
+  // load or generate agent keypair
+  let agentKeypair: Keypair
+  if (config.privateKey) {
+    try {
+      const parsed = JSON.parse(config.privateKey)
+      if (Array.isArray(parsed)) {
+        agentKeypair = Keypair.fromSecretKey(Uint8Array.from(parsed))
+      } else {
+        throw new Error('SOLANA_PRIVATE_KEY JSON must be a byte array')
+      }
+    } catch (e: any) {
+      if (e.message?.includes('byte array')) throw e
+      // not JSON — try base58
+      agentKeypair = Keypair.fromSecretKey(decodeBase58(config.privateKey))
+    }
+    log('info', 'loaded keypair from SOLANA_PRIVATE_KEY')
+  } else {
+    agentKeypair = Keypair.generate()
+    log('info', 'generated fresh agent keypair')
+  }
+
   console.log('=== torch liquidation bot ===')
   console.log(`agent wallet: ${agentKeypair.publicKey.toBase58()}`)
   console.log(`vault creator: ${config.vaultCreator}`)
@@ -176,7 +193,7 @@ const main = async () => {
   while (true) {
     try {
       log('debug', '--- scan cycle start ---')
-      await scanAndLiquidate(connection, log, config.vaultCreator)
+      await scanAndLiquidate(connection, log, config.vaultCreator, agentKeypair)
       log('debug', '--- scan cycle end ---')
     } catch (err: any) {
       log('error', `scan cycle error: ${err.message}`)

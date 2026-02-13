@@ -1,6 +1,6 @@
 # Torch Liquidation Bot — Design Document
 
-> Autonomous vault-based liquidation keeper for Torch Market lending on Solana. Version 3.0.0.
+> Autonomous vault-based liquidation keeper for Torch Market lending on Solana. Version 3.0.1.
 
 ## Overview
 
@@ -59,7 +59,7 @@ The bot is built on `torchsdk@3.2.3` and targets the Torch Market on-chain progr
 ```
 packages/bot/src/
 ├── index.ts      Entry point — keypair generation, vault verification, scan loop
-├── config.ts     loadConfig() — validates RPC_URL, VAULT_CREATOR, SCAN_INTERVAL_MS, LOG_LEVEL
+├── config.ts     loadConfig() — validates SOLANA_RPC_URL, VAULT_CREATOR, SOLANA_PRIVATE_KEY, SCAN_INTERVAL_MS, LOG_LEVEL
 ├── types.ts      BotConfig, LogLevel interfaces
 └── utils.ts      sol(), bpsToPercent(), createLogger()
 ```
@@ -89,7 +89,7 @@ Every liquidation routes through the Torch Vault. SOL comes from the vault. Coll
 
 ### 3. Disposable Keypair
 
-The agent keypair is generated fresh on every startup with `Keypair.generate()`. No key files, no seed phrases, no environment variable required. The keypair is ephemeral — it exists only in runtime memory.
+By default, the agent keypair is generated fresh on every startup with `Keypair.generate()`. Optionally, `SOLANA_PRIVATE_KEY` can be provided (base58 or JSON byte array) to persist the agent wallet across restarts. In both cases, the keypair exists only in runtime memory and is never logged or transmitted.
 
 ### 4. Fail-Safe Startup
 
@@ -174,16 +174,17 @@ When `vault` is provided:
 
 ```typescript
 interface BotConfig {
-  rpcUrl: string         // RPC_URL env var (required)
-  vaultCreator: string   // VAULT_CREATOR env var (required)
-  scanIntervalMs: number // SCAN_INTERVAL_MS env var (default 30000, min 5000)
-  logLevel: LogLevel     // LOG_LEVEL env var (default 'info')
+  rpcUrl: string           // SOLANA_RPC_URL env var, fallback RPC_URL (required)
+  vaultCreator: string     // VAULT_CREATOR env var (required)
+  privateKey: string | null // SOLANA_PRIVATE_KEY env var (optional)
+  scanIntervalMs: number   // SCAN_INTERVAL_MS env var (default 30000, min 5000)
+  logLevel: LogLevel       // LOG_LEVEL env var (default 'info')
 }
 ```
 
 ### Validation
 
-- `RPC_URL` must be set (throws on missing)
+- `SOLANA_RPC_URL` must be set, fallback `RPC_URL` (throws on missing)
 - `VAULT_CREATOR` must be set (throws on missing)
 - `SCAN_INTERVAL_MS` must be >= 5000 (prevents RPC rate limiting)
 - `LOG_LEVEL` must be one of `debug`, `info`, `warn`, `error`
@@ -247,3 +248,4 @@ Tests run against a Surfpool mainnet fork:
 | 1.0.0 | Initial read-only lending scanner. No wallet, no transactions, no state changes. |
 | 2.0.0 | Added vault queries (`getVault`, `getVaultForWallet`). Still read-only. |
 | 3.0.0 | **Fully operational vault-based liquidation keeper.** In-process keypair generation. Vault-routed `buildLiquidateTransaction`. Continuous scan-liquidate loop. Startup vault and link verification. Updated to `torchsdk@3.2.3`. Kit version 1.0.0. |
+| 3.0.1 | Optional `SOLANA_PRIVATE_KEY` support (base58 or JSON byte array) for persistent agent wallet. Inline base58 decoder (no bs58 dependency). `SOLANA_RPC_URL` as primary env var with `RPC_URL` fallback. `VAULT_CREATOR` added to manifest `requires.env`. ClawHub audit consistency fixes. |

@@ -1,6 +1,6 @@
 {
   "name": "torch-liquidation-bot",
-  "version": "3.0.0",
+  "version": "3.0.1",
   "description": "autonomous vault-based liquidation keeper for Torch Market lending on Solana using torchsdk",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
