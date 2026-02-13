@@ -1,6 +1,6 @@
 # Torch Market — Whitepaper
 
-**Version 3.2.3** | February 2026
+**Solana Program Version 3.2.0** | February 2026
 
 ---
 

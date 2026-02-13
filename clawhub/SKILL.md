@@ -1,6 +1,6 @@
 ---
 name: torch-liquidation-bot
-version: "3.0.1"
+version: "3.0.2"
 description: Autonomous vault-based liquidation keeper for Torch Market lending on Solana. Scans all migrated tokens for underwater loan positions (LTV > 65%), builds and executes liquidation transactions through a Torch Vault, and collects a 10% collateral bonus. The agent keypair is generated in-process -- disposable, holds nothing of value. All SOL and collateral tokens route through the vault. The human principal creates the vault, funds it, links the agent, and retains full control. Built on torchsdk v3.2.3 and the Torch Market protocol.
 license: MIT
 disable-model-invocation: true
@@ -18,11 +18,11 @@ metadata:
     install:
       - id: npm-torch-liquidation-bot
         kind: npm
-        package: torch-liquidation-bot@^3.0.0
+        package: torch-liquidation-bot@^3.0.2
         flags: []
         label: "Install Torch Liquidation Bot (npm, optional -- SDK is bundled in lib/torchsdk/ and bot source is bundled under lib/kit on clawhub)"
   author: torch-market
-  version: "3.0.1"
+  version: "3.0.2"
   clawhub: https://clawhub.ai/mrsirg97-rgb/torch-liquidation-bot
   kit-source: https://github.com/mrsirg97-rgb/torch-liquidation-kit
   website: https://torch.market
@@ -145,7 +145,7 @@ If the agent keypair is compromised, the attacker gets dust and vault access tha
 ### 1. Install
 
 ```bash
-npm install torch-liquidation-bot@3.0.1
+npm install torch-liquidation-bot@3.0.2
 ```
 
 Or use the bundled source from ClawHub — the Torch SDK is included in `lib/torchsdk/` and the bot source is in `lib/kit/`.
@@ -203,7 +203,7 @@ On first run, the bot prints the agent keypair and instructions to link it. Link
 ```
 packages/bot/src/
 ├── index.ts    — entry point: keypair generation, vault verification, scan loop
-├── config.ts   — loadConfig(): validates SOLANA_RPC_URL, VAULT_CREATOR, SCAN_INTERVAL_MS, LOG_LEVEL
+├── config.ts   — loadConfig(): validates SOLANA_RPC_URL, VAULT_CREATOR, SOLANA_PRIVATE_KEY, SCAN_INTERVAL_MS, LOG_LEVEL
 ├── types.ts    — BotConfig, LogLevel interfaces
 └── utils.ts    — sol(), bpsToPercent(), createLogger()
 ```
@@ -284,7 +284,7 @@ The bot uses a focused subset of the Torch SDK:
 | `getVault(connection, creator)` | Verify vault exists on startup |
 | `getVaultForWallet(connection, wallet)` | Verify agent is linked to vault |
 | `buildLiquidateTransaction(connection, params)` | Build the liquidation transaction (vault-routed) |
-| `confirmTransaction(connection, sig, wallet)` | Confirm transaction for SAID reputation |
+| `confirmTransaction(connection, sig, wallet)` | Confirm transaction on-chain via RPC (verifies signer, checks Torch instructions) |
 
 ### buildLiquidateTransaction Parameters
 
@@ -343,15 +343,17 @@ The agent never needs the authority's private key. The authority never needs the
 
 ### External Runtime Dependencies
 
-The bot's SDK makes outbound HTTPS requests to three external services beyond the Solana RPC:
+The SDK contains functions that make outbound HTTPS requests to external services. The bot's runtime path contacts **two** of them:
 
-| Service | Purpose | When Called |
-|---------|---------|------------|
-| **SAID Protocol** (`api.saidprotocol.com`) | Agent identity verification and trust tier lookup | `confirmTransaction()` |
-| **CoinGecko** (`api.coingecko.com`) | SOL/USD price for display | Token queries with USD pricing |
-| **Irys Gateway** (`gateway.irys.xyz`) | Token metadata fallback (name, symbol, image) | `getToken()` when on-chain metadata URI points to Irys |
+| Service | Purpose | When Called | Bot Uses? |
+|---------|---------|------------|-----------|
+| **CoinGecko** (`api.coingecko.com`) | SOL/USD price for display | Token queries with USD pricing | Yes — via `getTokens()`, `getToken()` |
+| **Irys Gateway** (`gateway.irys.xyz`) | Token metadata fallback (name, symbol, image) | `getToken()` when on-chain metadata URI points to Irys | Yes — via `getTokens()` |
+| **SAID Protocol** (`api.saidprotocol.com`) | Agent identity verification and trust tier lookup | `verifySaid()` only | **No** — the bot does not call `verifySaid()` |
 
-No credentials are sent to these services. All requests are read-only GET/POST. If any service is unreachable, the SDK degrades gracefully. No private key material is ever transmitted to any external endpoint.
+**`confirmTransaction()` does NOT contact SAID.** Despite living in the SDK's `said.js` module, it only calls `connection.getParsedTransaction()` (Solana RPC) to verify the transaction succeeded on-chain and determine the event type. No data is sent to any external service.
+
+No credentials are sent to CoinGecko or Irys. All requests are read-only GET. If either service is unreachable, the SDK degrades gracefully. No private key material is ever transmitted to any external endpoint.
 
 ---
 

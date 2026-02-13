@@ -3,13 +3,37 @@
  * utils.ts — shared helpers.
  */
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.bpsToPercent = exports.sol = void 0;
+exports.decodeBase58 = exports.bpsToPercent = exports.sol = void 0;
 exports.createLogger = createLogger;
 const torchsdk_1 = require("torchsdk");
 const sol = (lamports) => (lamports / torchsdk_1.LAMPORTS_PER_SOL).toFixed(4);
 exports.sol = sol;
 const bpsToPercent = (bps) => (bps / 100).toFixed(2) + '%';
 exports.bpsToPercent = bpsToPercent;
+// base58 decoder — avoids ESM-only bs58 dependency
+const B58 = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+const decodeBase58 = (s) => {
+    const result = [];
+    for (let i = 0; i < s.length; i++) {
+        let carry = B58.indexOf(s[i]);
+        if (carry < 0)
+            throw new Error(`invalid base58 character: ${s[i]}`);
+        for (let j = 0; j < result.length; j++) {
+            carry += result[j] * 58;
+            result[j] = carry & 0xff;
+            carry >>= 8;
+        }
+        while (carry > 0) {
+            result.push(carry & 0xff);
+            carry >>= 8;
+        }
+    }
+    for (let i = 0; i < s.length && s[i] === '1'; i++) {
+        result.push(0);
+    }
+    return new Uint8Array(result.reverse());
+};
+exports.decodeBase58 = decodeBase58;
 const LEVEL_ORDER = ['debug', 'info', 'warn', 'error'];
 function createLogger(minLevel) {
     const minIdx = LEVEL_ORDER.indexOf(minLevel);

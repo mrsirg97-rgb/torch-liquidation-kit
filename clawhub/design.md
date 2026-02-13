@@ -1,6 +1,6 @@
 # Torch Liquidation Bot — Design Document
 
-> Autonomous vault-based liquidation keeper for Torch Market lending on Solana. Version 3.0.1.
+> Autonomous vault-based liquidation keeper for Torch Market lending on Solana. Version 3.0.2.
 
 ## Overview
 
@@ -43,7 +43,7 @@ The bot is built on `torchsdk@3.2.3` and targets the Torch Market on-chain progr
 │    buildLiquidateTransaction (vault-routed)                │
 │                                                           │
 │  Confirmation:                                            │
-│    confirmTransaction (SAID reputation)                    │
+│    confirmTransaction (on-chain via RPC)                   │
 └──────────────────────────┬───────────────────────────────┘
                            │
                            ▼
@@ -248,4 +248,4 @@ Tests run against a Surfpool mainnet fork:
 | 1.0.0 | Initial read-only lending scanner. No wallet, no transactions, no state changes. |
 | 2.0.0 | Added vault queries (`getVault`, `getVaultForWallet`). Still read-only. |
 | 3.0.0 | **Fully operational vault-based liquidation keeper.** In-process keypair generation. Vault-routed `buildLiquidateTransaction`. Continuous scan-liquidate loop. Startup vault and link verification. Updated to `torchsdk@3.2.3`. Kit version 1.0.0. |
-| 3.0.1 | Optional `SOLANA_PRIVATE_KEY` support (base58 or JSON byte array) for persistent agent wallet. Inline base58 decoder (no bs58 dependency). `SOLANA_RPC_URL` as primary env var with `RPC_URL` fallback. `VAULT_CREATOR` added to manifest `requires.env`. ClawHub audit consistency fixes. |
+| 3.0.2 | Optional `SOLANA_PRIVATE_KEY` support (base58 or JSON byte array) for persistent agent wallet. Inline base58 decoder (no bs58 dependency). `SOLANA_RPC_URL` as primary env var with `RPC_URL` fallback. `VAULT_CREATOR` added to manifest `requires.env`. ClawHub audit consistency fixes. |

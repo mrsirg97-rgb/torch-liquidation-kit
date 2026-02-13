@@ -1,4 +1,4 @@
-# torch-liquidation-bot v3.0.1 (Vault Mode)
+# torch-liquidation-bot v3.0.2 (Vault Mode)
 
 Vault-based liquidation bot for [Torch Market](https://torch.market) on Solana. Generates an agent keypair in-process — no user wallet required. All operations route through a Torch Vault.
 
@@ -151,15 +151,16 @@ pnpm test
 
 ### External Runtime Dependencies
 
-The SDK makes outbound HTTPS requests to three external services beyond the Solana RPC:
+The SDK makes outbound HTTPS requests to two external services at runtime (the bot does **not** contact SAID Protocol):
 
 | Service | Purpose | When Called |
 |---------|---------|------------|
-| **SAID Protocol** (`api.saidprotocol.com`) | Agent identity verification and trust tier lookup | `confirmTransaction()` |
-| **CoinGecko** (`api.coingecko.com`) | SOL/USD price for display | Token queries with USD pricing |
-| **Irys Gateway** (`gateway.irys.xyz`) | Token metadata fallback (name, symbol, image) | `getToken()` when on-chain metadata URI points to Irys |
+| **CoinGecko** (`api.coingecko.com`) | SOL/USD price for display | Token queries via `getTokens()` |
+| **Irys Gateway** (`gateway.irys.xyz`) | Token metadata fallback (name, symbol, image) | `getTokens()` when on-chain metadata URI points to Irys |
 
-No credentials are sent to these services. All requests are read-only GET/POST. If any service is unreachable, the SDK degrades gracefully.
+`confirmTransaction()` does NOT contact SAID — it only calls `connection.getParsedTransaction()` (Solana RPC). The SDK exports a `verifySaid()` function that contacts `api.saidprotocol.com`, but the bot never calls it.
+
+No credentials are sent to any external service. All requests are read-only GET. No private key material is ever transmitted.
 
 ## Links
 

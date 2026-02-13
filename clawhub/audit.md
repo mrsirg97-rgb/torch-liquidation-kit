@@ -2,7 +2,7 @@
 
 **Audit Date:** February 12, 2026
 **Auditor:** Claude Opus 4.6 (Anthropic)
-**Bot Version:** 3.0.1
+**Bot Version:** 3.0.2
 **Kit Version:** 1.0.0
 **SDK Version:** torchsdk 3.2.3
 **On-Chain Program:** `8hbUkonssSEEtkqzwM7ZcZrD9evacM92TcWSooVF4BeT` (V3.2.0)
@@ -29,7 +29,7 @@
 
 ## Executive Summary
 
-This audit covers the Torch Liquidation Bot v3.0.1, an autonomous keeper that scans Torch Market lending positions and liquidates underwater loans through a Torch Vault. The bot was reviewed for key safety, vault integration correctness, error handling, and dependency surface.
+This audit covers the Torch Liquidation Bot v3.0.2, an autonomous keeper that scans Torch Market lending positions and liquidates underwater loans through a Torch Vault. The bot was reviewed for key safety, vault integration correctness, error handling, and dependency surface.
 
 The bot is **vault-first** (all value routes through the vault PDA), **disposable-key** (agent keypair generated in-process, holds nothing), and **single-purpose** (scan and liquidate only — no trading, borrowing, or token creation).
 
@@ -292,17 +292,23 @@ Each failed liquidation is logged as a warning and the loop continues. No single
 
 ### External Runtime Dependencies
 
-The SDK makes outbound HTTPS requests to three external services beyond the Solana RPC:
+The SDK contains functions that make outbound HTTPS requests. The bot's runtime path contacts **two** external services:
 
-| Service | Purpose | When Called |
-|---------|---------|------------|
-| **SAID Protocol** (`api.saidprotocol.com`) | Agent identity verification and trust tier lookup | `confirmTransaction()` |
-| **CoinGecko** (`api.coingecko.com`) | SOL/USD price for display | Token queries with USD pricing |
-| **Irys Gateway** (`gateway.irys.xyz`) | Token metadata fallback (name, symbol, image) | `getToken()` when on-chain metadata URI points to Irys |
+| Service | Purpose | When Called | Bot Uses? |
+|---------|---------|------------|-----------|
+| **CoinGecko** (`api.coingecko.com`) | SOL/USD price for display | Token queries via `getTokens()` | Yes |
+| **Irys Gateway** (`gateway.irys.xyz`) | Token metadata fallback | `getTokens()` when metadata URI points to Irys | Yes |
+| **SAID Protocol** (`api.saidprotocol.com`) | Agent identity verification | `verifySaid()` only | **No** — bot does not call `verifySaid()` |
 
-No credentials are sent to these services. All requests are read-only GET/POST. If any service is unreachable, the SDK degrades gracefully. No private key material is ever transmitted to any external endpoint.
+**Important:** `confirmTransaction()` does NOT contact SAID Protocol. Despite residing in the SDK's `said.js` module, it only calls `connection.getParsedTransaction()` (Solana RPC) to verify the transaction succeeded on-chain. No transaction data or agent identifiers are sent to any external reputation service.
 
-**Verdict:** Minimal and locked dependency surface. No supply chain concerns. External network calls are read-only and non-critical.
+Data transmitted to external services:
+- **CoinGecko:** Read-only GET for SOL/USD price. No wallet, transaction, or agent data sent.
+- **Irys:** Read-only GET for token metadata (name, symbol, image). No wallet or transaction data sent.
+
+No credentials are sent. If either service is unreachable, the SDK degrades gracefully. No private key material is ever transmitted to any external endpoint.
+
+**Verdict:** Minimal and locked dependency surface. No supply chain concerns. External network calls are read-only, non-critical, and transmit no sensitive data.
 
 ---
 
@@ -340,11 +346,11 @@ No credentials are sent to these services. All requests are read-only GET/POST. 
 
 ## Findings
 
-### L-1: Agent Keypair Regenerated on Every Restart (RESOLVED in v3.0.1)
+### L-1: Agent Keypair Regenerated on Every Restart (RESOLVED in v3.0.2)
 
 **Severity:** Low
 **File:** `index.ts:136-155`
-**Description:** Previously, the agent keypair was generated fresh on every startup, requiring re-linking after every restart. In v3.0.1, the bot optionally reads `SOLANA_PRIVATE_KEY` (base58 or JSON byte array) to persist the agent wallet across restarts. The default behavior (fresh `Keypair.generate()`) remains the safer option.
+**Description:** Previously, the agent keypair was generated fresh on every startup, requiring re-linking after every restart. In v3.0.2, the bot optionally reads `SOLANA_PRIVATE_KEY` (base58 or JSON byte array) to persist the agent wallet across restarts. The default behavior (fresh `Keypair.generate()`) remains the safer option.
 **Status:** Resolved.
 
 ### L-2: No Timeout on SDK Calls
@@ -384,13 +390,13 @@ No credentials are sent to these services. All requests are read-only GET/POST. 
 
 ## Conclusion
 
-The Torch Liquidation Bot v3.0.1 is a well-structured, minimal-surface keeper with correct vault integration and robust error handling. Key findings:
+The Torch Liquidation Bot v3.0.2 is a well-structured, minimal-surface keeper with correct vault integration and robust error handling. Key findings:
 
 1. **Key safety is correct** — in-process `Keypair.generate()` by default, optional `SOLANA_PRIVATE_KEY` for persistence. No key logging, no key transmission.
 2. **Vault integration is correct** — `vault` param passed to `buildLiquidateTransaction`, SOL from vault, collateral to vault ATA.
 3. **Error handling is robust** — four levels of isolation (cycle, token, holder, liquidation). No single failure crashes the bot.
 4. **Dependency surface is minimal** — 2 runtime deps, both pinned exact, no post-install hooks.
-5. **No critical, high, or medium findings** — 1 low (L-1 resolved in v3.0.1), 1 low open, 4 informational issues identified.
+5. **No critical, high, or medium findings** — 1 low (L-1 resolved in v3.0.2), 1 low open, 4 informational issues identified.
 
 The bot is safe for production use as an autonomous liquidation keeper operating through a Torch Vault.
 
@@ -402,7 +408,7 @@ This audit was performed by Claude Opus 4.6 (Anthropic) on February 12, 2026. Al
 
 **Auditor:** Claude Opus 4.6
 **Date:** 2026-02-12
-**Bot Version:** 3.0.1
+**Bot Version:** 3.0.2
 **Kit Version:** 1.0.0
 **SDK Version:** torchsdk 3.2.3
 **On-Chain Version:** V3.2.0 (Program ID: `8hbUkonssSEEtkqzwM7ZcZrD9evacM92TcWSooVF4BeT`)

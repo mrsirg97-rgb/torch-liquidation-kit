@@ -1,4 +1,4 @@
-# torch-liquidation-bot v3.0.1 (Vault Mode)
+# torch-liquidation-bot v3.0.2 (Vault Mode)
 
 Vault-based liquidation bot for [Torch Market](https://torch.market) on Solana. Generates an agent keypair in-process — no user wallet required. All operations route through a Torch Vault.
 
@@ -147,7 +147,20 @@ pnpm test
 - Authority can unlink the agent wallet instantly via `buildUnlinkWalletTransaction()`
 - Minimal dependencies: `@solana/web3.js` + `torchsdk` -- both pinned to exact versions
 - No post-install hooks, no remote code fetching
-- SDK contacts three external services (SAID Protocol, CoinGecko, Irys) -- all read-only, no credentials sent
+- `disable-model-invocation: true` -- agents cannot invoke this skill autonomously
+
+### External Runtime Dependencies
+
+The SDK makes outbound HTTPS requests to two external services at runtime (the bot does **not** contact SAID Protocol):
+
+| Service | Purpose | When Called |
+|---------|---------|------------|
+| **CoinGecko** (`api.coingecko.com`) | SOL/USD price for display | Token queries via `getTokens()` |
+| **Irys Gateway** (`gateway.irys.xyz`) | Token metadata fallback (name, symbol, image) | `getTokens()` when on-chain metadata URI points to Irys |
+
+`confirmTransaction()` does NOT contact SAID — it only calls `connection.getParsedTransaction()` (Solana RPC). The SDK exports a `verifySaid()` function that contacts `api.saidprotocol.com`, but the bot never calls it.
+
+No credentials are sent to any external service. All requests are read-only GET. No private key material is ever transmitted.
 
 ## Links
 
