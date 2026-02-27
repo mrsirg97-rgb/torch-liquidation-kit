@@ -33,6 +33,17 @@ export const decodeBase58 = (s: string): Uint8Array => {
   return new Uint8Array(result.reverse())
 }
 
+const RPC_TIMEOUT_MS = 30_000
+
+export function withTimeout<T>(promise: Promise<T>, label: string): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error(`${label} timed out after ${RPC_TIMEOUT_MS}ms`)), RPC_TIMEOUT_MS),
+    ),
+  ])
+}
+
 const LEVEL_ORDER: LogLevel[] = ['debug', 'info', 'warn', 'error']
 
 export function createLogger(minLevel: LogLevel) {

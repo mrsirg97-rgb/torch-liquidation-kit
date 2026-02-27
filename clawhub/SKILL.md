@@ -1,6 +1,6 @@
 ---
 name: torch-liquidation-bot
-version: "4.0.1"
+version: "4.0.2"
 description: Autonomous vault-based liquidation keeper for Torch Market lending on Solana. Scans all migrated tokens for underwater loan positions (LTV > 65%) using the SDK's built-in bulk loan scanner (getAllLoanPositions), builds and executes liquidation transactions through a Torch Vault, and collects a 10% collateral bonus. The agent keypair is generated in-process -- disposable, holds nothing of value. All SOL and collateral tokens route through the vault. The human principal creates the vault, funds it, links the agent, and retains full control. Built on torchsdk v3.7.22 and the Torch Market protocol.
 license: MIT
 disable-model-invocation: true
@@ -35,11 +35,11 @@ metadata:
     install:
       - id: npm-torch-liquidation-bot
         kind: npm
-        package: torch-liquidation-bot@^4.0.0
+        package: torch-liquidation-bot@^4.0.1
         flags: []
         label: "Install Torch Liquidation Bot (npm, optional -- SDK is bundled in lib/torchsdk/ and bot source is bundled under lib/kit on clawhub)"
   author: torch-market
-  version: "4.0.1"
+  version: "4.0.2"
   clawhub: https://clawhub.ai/mrsirg97-rgb/torch-liquidation-bot
   kit-source: https://github.com/mrsirg97-rgb/torch-liquidation-kit
   website: https://torch.market
@@ -169,7 +169,7 @@ If the agent keypair is compromised, the attacker gets dust and vault access tha
 ### 1. Install
 
 ```bash
-npm install torch-liquidation-bot@4.0.0
+npm install torch-liquidation-bot@4.0.1
 ```
 
 Or use the bundled source from ClawHub — the Torch SDK is included in `lib/torchsdk/` and the bot source is in `lib/kit/`.
@@ -229,10 +229,10 @@ packages/bot/src/
 ├── index.ts    — entry point: keypair generation, vault verification, scan loop
 ├── config.ts   — loadConfig(): validates SOLANA_RPC_URL, VAULT_CREATOR, SOLANA_PRIVATE_KEY, SCAN_INTERVAL_MS, LOG_LEVEL
 ├── types.ts    — BotConfig, LogLevel interfaces
-└── utils.ts    — sol(), bpsToPercent(), createLogger()
+└── utils.ts    — sol(), bpsToPercent(), withTimeout(), createLogger()
 ```
 
-The bot is ~188 lines of TypeScript. It does one thing: find underwater loans and liquidate them through the vault.
+The bot is ~192 lines of TypeScript. It does one thing: find underwater loans and liquidate them through the vault.
 
 ### Dependencies
 
@@ -371,6 +371,10 @@ The agent never needs the authority's private key. The authority never needs the
 2. **Never log, print, store, or transmit private key material.** The agent keypair exists only in runtime memory.
 3. **Never embed keys in source code or logs.** The agent pubkey is printed — the secret key is never exposed.
 4. **Use a secure RPC endpoint.** Default to a private RPC provider. Never use an unencrypted HTTP endpoint for mainnet transactions.
+
+### RPC Timeout
+
+All SDK calls are wrapped with a 30-second timeout (`withTimeout` in utils.ts). A hanging or unresponsive RPC endpoint cannot stall the bot indefinitely — the call rejects, the error is caught by the scan loop, and the bot continues to the next token or cycle.
 
 ### Environment Variables
 

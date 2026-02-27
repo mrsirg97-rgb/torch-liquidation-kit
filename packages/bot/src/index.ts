@@ -27,7 +27,7 @@ import {
   type LoanPositionWithKey,
 } from 'torchsdk'
 import { loadConfig } from './config'
-import { sol, bpsToPercent, createLogger, decodeBase58 } from './utils'
+import { sol, bpsToPercent, createLogger, decodeBase58, withTimeout } from './utils'
 
 // ---------------------------------------------------------------------------
 // scan & liquidate
@@ -39,18 +39,17 @@ const scanAndLiquidate = async (
   vaultCreator: string,
   agentKeypair: Keypair,
 ) => {
-  const { tokens } = await getTokens(connection, {
-    status: 'migrated',
-    sort: 'volume',
-    limit: 50,
-  })
+  const { tokens } = await withTimeout(
+    getTokens(connection, { status: 'migrated', sort: 'volume', limit: 50 }),
+    'getTokens',
+  )
 
   log('debug', `discovered ${tokens.length} migrated tokens`)
 
   for (const token of tokens) {
     let positions: LoanPositionWithKey[]
     try {
-      const result = await getAllLoanPositions(connection, token.mint)
+      const result = await withTimeout(getAllLoanPositions(connection, token.mint), 'getAllLoanPositions')
       positions = result.positions
     } catch {
       continue // lending not enabled for this token
@@ -76,16 +75,22 @@ const scanAndLiquidate = async (
 
       // build and execute liquidation through the vault
       try {
-        const { transaction, message } = await buildLiquidateTransaction(connection, {
-          mint: token.mint,
-          liquidator: agentKeypair.publicKey.toBase58(),
-          borrower: position.borrower,
-          vault: vaultCreator,
-        })
+        const { transaction, message } = await withTimeout(
+          buildLiquidateTransaction(connection, {
+            mint: token.mint,
+            liquidator: agentKeypair.publicKey.toBase58(),
+            borrower: position.borrower,
+            vault: vaultCreator,
+          }),
+          'buildLiquidateTransaction',
+        )
 
         transaction.sign(agentKeypair)
         const signature = await connection.sendRawTransaction(transaction.serialize())
-        await confirmTransaction(connection, signature, agentKeypair.publicKey.toBase58())
+        await withTimeout(
+          confirmTransaction(connection, signature, agentKeypair.publicKey.toBase58()),
+          'confirmTransaction',
+        )
 
         log(
           'info',
@@ -139,14 +144,14 @@ const main = async () => {
   console.log()
 
   // verify vault exists
-  const vault = await getVault(connection, config.vaultCreator)
+  const vault = await withTimeout(getVault(connection, config.vaultCreator), 'getVault')
   if (!vault) {
     throw new Error(`vault not found for creator ${config.vaultCreator}`)
   }
   log('info', `vault found — authority=${vault.authority}`)
 
   // verify agent wallet is linked to vault
-  const link = await getVaultForWallet(connection, agentKeypair.publicKey.toBase58())
+  const link = await withTimeout(getVaultForWallet(connection, agentKeypair.publicKey.toBase58()), 'getVaultForWallet')
   if (!link) {
     console.log()
     console.log('--- ACTION REQUIRED ---')

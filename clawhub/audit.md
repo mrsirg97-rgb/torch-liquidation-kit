@@ -2,7 +2,7 @@
 
 **Audit Date:** February 27, 2026
 **Auditor:** Claude Opus 4.6 (Anthropic)
-**Bot Version:** 4.0.0
+**Bot Version:** 4.0.1
 **Kit Version:** 2.0.0
 **SDK Version:** torchsdk 3.7.22
 **On-Chain Program:** `8hbUkonssSEEtkqzwM7ZcZrD9evacM92TcWSooVF4BeT` (V3.7.7, 27 instructions)
@@ -43,7 +43,7 @@ The bot remains **vault-first** (all value routes through the vault PDA), **disp
 |----------|--------|-------|
 | Key Safety | **PASS** | In-process `Keypair.generate()`, no key files, no key logging |
 | Vault Integration | **PASS** | `vault` param correctly passed to `buildLiquidateTransaction` |
-| Error Handling | **PASS** | Cycle-level catch, per-token try/catch, per-liquidation try/catch |
+| Error Handling | **PASS** | Cycle-level catch, per-token try/catch, per-liquidation try/catch, 30s RPC timeout |
 | Config Validation | **PASS** | Required env vars checked, scan interval floored at 5000ms |
 | Dependencies | **MINIMAL** | 2 runtime deps, both pinned exact |
 | Supply Chain | **LOW RISK** | No post-install hooks, no remote code fetching |
@@ -55,7 +55,7 @@ The bot remains **vault-first** (all value routes through the vault PDA), **disp
 | Critical | 0 |
 | High | 0 |
 | Medium | 0 |
-| Low | 1 |
+| Low | 0 (1 resolved) |
 | Informational | 2 |
 
 ---
@@ -66,14 +66,14 @@ The bot remains **vault-first** (all value routes through the vault PDA), **disp
 
 | File | Lines | Role |
 |------|-------|------|
-| `packages/bot/src/index.ts` | 187 | Entry point: keypair load/generate, vault check, scan loop |
+| `packages/bot/src/index.ts` | 192 | Entry point: keypair load/generate, vault check, scan loop |
 | `packages/bot/src/config.ts` | 36 | Environment variable validation |
 | `packages/bot/src/types.ts` | 13 | BotConfig and LogLevel interfaces |
-| `packages/bot/src/utils.ts` | 47 | Formatting helpers, logger, base58 decoder |
+| `packages/bot/src/utils.ts` | 58 | Formatting helpers, logger, base58 decoder, RPC timeout |
 | `packages/bot/tests/test_e2e.ts` | 248 | E2E test suite |
 | `packages/bot/package.json` | 37 | Dependencies and scripts |
 | `packages/bot/tsconfig.json` | 20 | TypeScript configuration |
-| **Total** | **~588** | |
+| **Total** | **~604** | |
 
 ### SDK Cross-Reference
 
@@ -399,14 +399,13 @@ No credentials are sent. If either service is unreachable, the SDK degrades grac
 
 ## Findings
 
-### L-1: No Timeout on SDK Calls
+### L-1: No Timeout on SDK Calls — RESOLVED in v4.0.1
 
 **Severity:** Low
-**File:** `index.ts:42-102`
-**Description:** SDK calls (`getTokens`, `getAllLoanPositions`, `buildLiquidateTransaction`) have no explicit timeout. A hanging RPC endpoint could block the scan loop indefinitely.
-**Impact:** Bot stalls until the RPC connection times out at the TCP level.
-**Recommendation:** Wrap SDK calls in a `Promise.race` with a timeout (e.g., 30 seconds per call).
-**Note:** The attack surface is reduced from v3.0.2 — the bot now makes 2 SDK calls per token (down from 2 + N), so fewer calls can hang.
+**File:** `utils.ts:12-21`, `index.ts` (all SDK call sites)
+**Description:** SDK calls (`getTokens`, `getAllLoanPositions`, `buildLiquidateTransaction`, `confirmTransaction`, `getVault`, `getVaultForWallet`) previously had no explicit timeout. A hanging RPC endpoint could block the scan loop indefinitely.
+**Resolution:** All 6 SDK calls are now wrapped with `withTimeout(promise, label)` which races against a 30-second deadline via `Promise.race`. Timeouts in the scan loop are caught by existing try/catch layers — the bot logs the timeout and continues. Startup timeouts surface as a FATAL error (correct behavior — if RPC is unreachable at startup, the bot should not silently hang).
+**Status:** Resolved in v4.0.1.
 
 ### I-1: No Deduplication Across Cycles
 
@@ -445,14 +444,14 @@ No credentials are sent. If either service is unreachable, the SDK degrades grac
 
 ## Conclusion
 
-The Torch Liquidation Bot v4.0.0 is a cleaner, more efficient keeper with correct vault integration and robust error handling. Key findings:
+The Torch Liquidation Bot v4.0.1 is a cleaner, more efficient keeper with correct vault integration and robust error handling. Key findings:
 
 1. **Key safety is correct** — in-process `Keypair.generate()` by default, optional `SOLANA_PRIVATE_KEY` for persistence. No key logging, no key transmission. Unchanged from v3.0.2.
 2. **Vault integration is correct** — `vault` param passed to `buildLiquidateTransaction`, SOL from vault, collateral to vault ATA. Unchanged from v3.0.2.
 3. **Scan pattern improved** — `getAllLoanPositions` replaces the N+1 holder scan. One RPC call per token, no 20-holder ceiling, pre-sorted results with early break. Two v3.0.2 findings (I-1, I-4) are resolved by this change.
-4. **Error handling is robust** — three levels of isolation (cycle, token, liquidation). The removed holder level is no longer needed.
+4. **Error handling is robust** — three levels of isolation (cycle, token, liquidation) plus 30-second RPC timeouts on all SDK calls. A hanging RPC cannot stall the bot.
 5. **Dependency surface is minimal** — 2 runtime deps, both pinned exact, no post-install hooks. SDK upgraded from 3.2.3 to 3.7.22.
-6. **No critical, high, or medium findings** — 1 low (no timeout, carried from v3.0.2 as L-2, reduced surface), 2 informational.
+6. **No critical, high, medium, or low findings** — L-1 (no timeout) resolved in v4.0.1. 2 informational issues remain.
 
 The bot is safe for production use as an autonomous liquidation keeper operating through a Torch Vault.
 
@@ -464,7 +463,7 @@ This audit was performed by Claude Opus 4.6 (Anthropic) on February 27, 2026. Al
 
 **Auditor:** Claude Opus 4.6
 **Date:** 2026-02-27
-**Bot Version:** 4.0.0
+**Bot Version:** 4.0.1
 **Kit Version:** 2.0.0
 **SDK Version:** torchsdk 3.7.22
 **On-Chain Version:** V3.7.7 (Program ID: `8hbUkonssSEEtkqzwM7ZcZrD9evacM92TcWSooVF4BeT`, 27 instructions)

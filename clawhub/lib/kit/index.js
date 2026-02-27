@@ -25,16 +25,12 @@ const utils_1 = require("./utils");
 // scan & liquidate
 // ---------------------------------------------------------------------------
 const scanAndLiquidate = async (connection, log, vaultCreator, agentKeypair) => {
-    const { tokens } = await (0, torchsdk_1.getTokens)(connection, {
-        status: 'migrated',
-        sort: 'volume',
-        limit: 50,
-    });
+    const { tokens } = await (0, utils_1.withTimeout)((0, torchsdk_1.getTokens)(connection, { status: 'migrated', sort: 'volume', limit: 50 }), 'getTokens');
     log('debug', `discovered ${tokens.length} migrated tokens`);
     for (const token of tokens) {
         let positions;
         try {
-            const result = await (0, torchsdk_1.getAllLoanPositions)(connection, token.mint);
+            const result = await (0, utils_1.withTimeout)((0, torchsdk_1.getAllLoanPositions)(connection, token.mint), 'getAllLoanPositions');
             positions = result.positions;
         }
         catch {
@@ -52,15 +48,15 @@ const scanAndLiquidate = async (connection, log, vaultCreator, agentKeypair) => 
                 `owed=${(0, utils_1.sol)(position.total_owed)} SOL`);
             // build and execute liquidation through the vault
             try {
-                const { transaction, message } = await (0, torchsdk_1.buildLiquidateTransaction)(connection, {
+                const { transaction, message } = await (0, utils_1.withTimeout)((0, torchsdk_1.buildLiquidateTransaction)(connection, {
                     mint: token.mint,
                     liquidator: agentKeypair.publicKey.toBase58(),
                     borrower: position.borrower,
                     vault: vaultCreator,
-                });
+                }), 'buildLiquidateTransaction');
                 transaction.sign(agentKeypair);
                 const signature = await connection.sendRawTransaction(transaction.serialize());
-                await (0, torchsdk_1.confirmTransaction)(connection, signature, agentKeypair.publicKey.toBase58());
+                await (0, utils_1.withTimeout)((0, torchsdk_1.confirmTransaction)(connection, signature, agentKeypair.publicKey.toBase58()), 'confirmTransaction');
                 log('info', `LIQUIDATED | ${token.symbol} | borrower=${position.borrower.slice(0, 8)}... | ` +
                     `sig=${signature.slice(0, 16)}... | ${message}`);
             }
@@ -107,13 +103,13 @@ const main = async () => {
     console.log(`scan interval: ${config.scanIntervalMs}ms`);
     console.log();
     // verify vault exists
-    const vault = await (0, torchsdk_1.getVault)(connection, config.vaultCreator);
+    const vault = await (0, utils_1.withTimeout)((0, torchsdk_1.getVault)(connection, config.vaultCreator), 'getVault');
     if (!vault) {
         throw new Error(`vault not found for creator ${config.vaultCreator}`);
     }
     log('info', `vault found — authority=${vault.authority}`);
     // verify agent wallet is linked to vault
-    const link = await (0, torchsdk_1.getVaultForWallet)(connection, agentKeypair.publicKey.toBase58());
+    const link = await (0, utils_1.withTimeout)((0, torchsdk_1.getVaultForWallet)(connection, agentKeypair.publicKey.toBase58()), 'getVaultForWallet');
     if (!link) {
         console.log();
         console.log('--- ACTION REQUIRED ---');

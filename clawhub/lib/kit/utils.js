@@ -4,6 +4,7 @@
  */
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.decodeBase58 = exports.bpsToPercent = exports.sol = void 0;
+exports.withTimeout = withTimeout;
 exports.createLogger = createLogger;
 const torchsdk_1 = require("torchsdk");
 const sol = (lamports) => (lamports / torchsdk_1.LAMPORTS_PER_SOL).toFixed(4);
@@ -34,6 +35,13 @@ const decodeBase58 = (s) => {
     return new Uint8Array(result.reverse());
 };
 exports.decodeBase58 = decodeBase58;
+const RPC_TIMEOUT_MS = 30000;
+function withTimeout(promise, label) {
+    return Promise.race([
+        promise,
+        new Promise((_, reject) => setTimeout(() => reject(new Error(`${label} timed out after ${RPC_TIMEOUT_MS}ms`)), RPC_TIMEOUT_MS)),
+    ]);
+}
 const LEVEL_ORDER = ['debug', 'info', 'warn', 'error'];
 function createLogger(minLevel) {
     const minIdx = LEVEL_ORDER.indexOf(minLevel);
