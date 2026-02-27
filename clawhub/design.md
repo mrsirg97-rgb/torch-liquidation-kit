@@ -1,12 +1,12 @@
 # Torch Liquidation Bot — Design Document
 
-> Autonomous vault-based liquidation keeper for Torch Market lending on Solana. Version 3.0.2.
+> Autonomous vault-based liquidation keeper for Torch Market lending on Solana. Version 4.0.0.
 
 ## Overview
 
 The Torch Liquidation Bot is a single-purpose keeper that scans Torch Market lending positions and liquidates underwater loans through a Torch Vault. It generates a disposable agent keypair in-process, verifies vault linkage, and runs a continuous scan-liquidate loop. All SOL and collateral tokens route through the vault — the agent wallet holds nothing of value.
 
-The bot is built on `torchsdk@3.2.3` and targets the Torch Market on-chain program (`8hbUkonssSEEtkqzwM7ZcZrD9evacM92TcWSooVF4BeT`). It uses the SDK's read-only queries to discover liquidatable positions and the vault-routed `buildLiquidateTransaction` to execute them.
+The bot is built on `torchsdk@3.7.22` and targets the Torch Market on-chain program (`8hbUkonssSEEtkqzwM7ZcZrD9evacM92TcWSooVF4BeT`). It uses the SDK's bulk loan scanner (`getAllLoanPositions`) to discover liquidatable positions and the vault-routed `buildLiquidateTransaction` to execute them.
 
 ## Architecture
 
@@ -22,9 +22,9 @@ The bot is built on `torchsdk@3.2.3` and targets the Torch Market on-chain progr
 │    └── while (true)                                        │
 │         └── scanAndLiquidate()                             │
 │              ├── getTokens({ status: 'migrated' })         │
-│              ├── getLendingInfo(mint)                       │
-│              ├── getHolders(mint)                           │
-│              ├── getLoanPosition(mint, holder)              │
+│              ├── getAllLoanPositions(mint)                  │
+│              │    → returns positions sorted by health      │
+│              │    → break at first non-liquidatable         │
 │              ├── buildLiquidateTransaction(vault=creator)   │
 │              ├── transaction.sign(agentKeypair)             │
 │              ├── connection.sendRawTransaction()            │
@@ -33,10 +33,10 @@ The bot is built on `torchsdk@3.2.3` and targets the Torch Market on-chain progr
                            │
                            ▼
 ┌──────────────────────────────────────────────────────────┐
-│                    torchsdk v3.2.3                         │
+│                    torchsdk v3.7.22                        │
 │                                                           │
 │  Read-only queries:                                       │
-│    getTokens, getLendingInfo, getHolders, getLoanPosition  │
+│    getTokens, getAllLoanPositions                          │
 │    getVault, getVaultForWallet                             │
 │                                                           │
 │  Transaction builder:                                     │
@@ -101,11 +101,11 @@ If either check fails, the bot exits with clear instructions. It never enters th
 
 ### 5. Graceful Error Handling
 
-The scan loop catches all errors at the cycle level. A failed RPC call, a missing holder, or a failed liquidation never crashes the bot — it logs the error and moves to the next cycle. Individual token/holder iterations use try/catch to skip unavailable data.
+The scan loop catches all errors at the cycle level. A failed RPC call or a failed liquidation never crashes the bot — it logs the error and moves to the next cycle. Individual token iterations use try/catch to skip tokens where `getAllLoanPositions` fails.
 
 ### 6. Minimal Surface
 
-Two runtime dependencies (`@solana/web3.js`, `torchsdk`), both pinned to exact versions. ~190 lines of TypeScript. Four source files. No database, no API server, no indexer, no websockets.
+Two runtime dependencies (`@solana/web3.js`, `torchsdk`), both pinned to exact versions. ~187 lines of TypeScript. Four source files. No database, no API server, no indexer, no websockets.
 
 ---
 
@@ -113,12 +113,11 @@ Two runtime dependencies (`@solana/web3.js`, `torchsdk`), both pinned to exact v
 
 ```
 for each migrated token:
-  skip if getLendingInfo throws (lending not enabled)
-  skip if active_loans === 0
+  positions = getAllLoanPositions(mint)
+  skip if positions is empty
 
-  for each holder:
-    skip if getLoanPosition throws (no loan)
-    skip if position.health !== 'liquidatable'
+  for each position (pre-sorted: liquidatable → at_risk → healthy):
+    break if health !== 'liquidatable'
 
     → buildLiquidateTransaction(vault=creator)
     → sign with agent keypair
@@ -130,13 +129,13 @@ for each migrated token:
 
 `getTokens(connection, { status: 'migrated', sort: 'volume', limit: 50 })` returns the top 50 migrated tokens by volume. Only migrated tokens have active lending markets.
 
+### Loan Scanning
+
+`getAllLoanPositions(connection, mint)` scans all LoanPosition PDAs for a token via `getProgramAccounts` with discriminator + mint filters. Returns all active positions (borrowed_amount > 0) pre-sorted by health: `liquidatable → at_risk → healthy`. Fetches the Raydium pool price once per call (not per position).
+
 ### Loan Health
 
-The SDK's `getLoanPosition` returns a `health` field that is one of: `'healthy'`, `'warning'`, `'liquidatable'`, or `'none'`. The bot only acts on `'liquidatable'` — positions where LTV exceeds the 65% threshold.
-
-### Holder Discovery
-
-`getHolders(connection, mint)` returns token holders via `getTokenLargestAccounts`. These are potential borrowers — the bot checks each one's loan position.
+The SDK computes a `health` field for each position: `'healthy'`, `'at_risk'`, `'liquidatable'`, or `'none'`. The bot only acts on `'liquidatable'` — positions where LTV exceeds the 65% threshold. Because positions are pre-sorted, the bot breaks at the first non-liquidatable position.
 
 ---
 
@@ -148,7 +147,7 @@ The SDK's `getLoanPosition` returns a `health` field that is one of: `'healthy'`
 const { transaction, message } = await buildLiquidateTransaction(connection, {
   mint: token.mint,
   liquidator: agentKeypair.publicKey.toBase58(),
-  borrower: holder.address,
+  borrower: position.borrower,
   vault: vaultCreator,
 })
 ```
@@ -217,12 +216,12 @@ Tests run against a Surfpool mainnet fork:
 | Connection | RPC reachable, Solana version |
 | getTokens | Discovers migrated tokens via discriminator filter |
 | getLendingInfo | Reads lending state (rates, thresholds, active loans) |
-| getHolders + getLoanPosition | Checks holder loan positions |
+| getAllLoanPositions | Bulk scans active loans, verifies sort order (liquidatable first) |
 | getToken | Token metadata, price, status |
 | getVaultForWallet | Returns null for unlinked wallet |
 | In-process keypair | Keypair.generate() works, no external key |
 
-**Result:** 7 passed, 1 informational (Surfpool `getTokenLargestAccounts` limitation).
+**Result:** 9 passed, 0 failed.
 
 ---
 
@@ -231,7 +230,7 @@ Tests run against a Surfpool mainnet fork:
 | Package | Version | Purpose |
 |---------|---------|---------|
 | `@solana/web3.js` | 1.98.4 | Connection, Keypair, Transaction, sendRawTransaction |
-| `torchsdk` | 3.2.3 | Token queries, lending state, vault queries, liquidation builder, confirmation |
+| `torchsdk` | 3.7.22 | Token queries, bulk loan scanning, vault queries, liquidation builder, confirmation |
 
 | Dev Package | Version | Purpose |
 |-------------|---------|---------|
@@ -249,3 +248,4 @@ Tests run against a Surfpool mainnet fork:
 | 2.0.0 | Added vault queries (`getVault`, `getVaultForWallet`). Still read-only. |
 | 3.0.0 | **Fully operational vault-based liquidation keeper.** In-process keypair generation. Vault-routed `buildLiquidateTransaction`. Continuous scan-liquidate loop. Startup vault and link verification. Updated to `torchsdk@3.2.3`. Kit version 1.0.0. |
 | 3.0.2 | Optional `SOLANA_PRIVATE_KEY` support (base58 or JSON byte array) for persistent agent wallet. Inline base58 decoder (no bs58 dependency). `SOLANA_RPC_URL` as primary env var with `RPC_URL` fallback. `VAULT_CREATOR` added to manifest `requires.env`. ClawHub audit consistency fixes. |
+| 4.0.0 | **Bulk loan scanning via `getAllLoanPositions`.** Replaces N+1 scan pattern (`getLendingInfo` → `getHolders` → per-holder `getLoanPosition`) with single RPC call per token. Positions pre-sorted by health with early break. Updated to `torchsdk@3.7.22` (V33 buyback removal, 70% utilization cap). Kit version 2.0.0. |

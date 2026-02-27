@@ -3,7 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getRaydiumMigrationAccounts = exports.getRaydiumObservationPda = exports.getRaydiumVaultPda = exports.getRaydiumLpMintPda = exports.getRaydiumPoolStatePda = exports.getRaydiumAuthorityPda = exports.orderTokensForRaydium = exports.calculateBondingProgress = exports.calculatePrice = exports.calculateSolOut = exports.calculateTokensOut = exports.getProgram = exports.getVaultWalletLinkPda = exports.getTorchVaultPda = exports.getCollateralVaultPda = exports.getLoanPositionPda = exports.getStarRecordPda = exports.getUserStatsPda = exports.getProtocolTreasuryPda = exports.getTokenTreasuryPda = exports.getVoteRecordPda = exports.getUserPositionPda = exports.getTreasuryTokenAccount = exports.getBondingCurvePda = exports.getGlobalConfigPda = exports.decodeString = exports.PROGRAM_ID = void 0;
+exports.getRaydiumMigrationAccounts = exports.getRaydiumObservationPda = exports.getRaydiumVaultPda = exports.getRaydiumLpMintPda = exports.getRaydiumPoolStatePda = exports.getRaydiumAuthorityPda = exports.orderTokensForRaydium = exports.calculateBondingProgress = exports.calculatePrice = exports.calculateSolOut = exports.calculateTokensOut = exports.getProgram = exports.getTreasuryLockTokenAccount = exports.getTreasuryLockPda = exports.getVaultWalletLinkPda = exports.getTorchVaultPda = exports.getCollateralVaultPda = exports.getLoanPositionPda = exports.getStarRecordPda = exports.getUserStatsPda = exports.getProtocolTreasuryPda = exports.getTokenTreasuryPda = exports.getVoteRecordPda = exports.getUserPositionPda = exports.getTreasuryTokenAccount = exports.getBondingCurvePda = exports.getGlobalConfigPda = exports.decodeString = exports.PROGRAM_ID = void 0;
 const anchor_1 = require("@coral-xyz/anchor");
 const web3_js_1 = require("@solana/web3.js");
 const constants_1 = require("./constants");
@@ -77,27 +77,41 @@ const getVaultWalletLinkPda = (wallet) => {
     return web3_js_1.PublicKey.findProgramAddressSync([Buffer.from(constants_1.VAULT_WALLET_LINK_SEED), wallet.toBuffer()], constants_1.PROGRAM_ID);
 };
 exports.getVaultWalletLinkPda = getVaultWalletLinkPda;
+// V27: Treasury Lock PDA (per mint)
+const getTreasuryLockPda = (mint) => {
+    return web3_js_1.PublicKey.findProgramAddressSync([Buffer.from(constants_1.TREASURY_LOCK_SEED), mint.toBuffer()], constants_1.PROGRAM_ID);
+};
+exports.getTreasuryLockPda = getTreasuryLockPda;
+// V27: Treasury Lock's Token-2022 ATA
+const getTreasuryLockTokenAccount = (mint, treasuryLock) => {
+    return (0, spl_token_1.getAssociatedTokenAddressSync)(mint, treasuryLock, true, // allowOwnerOffCurve (PDA)
+    constants_1.TOKEN_2022_PROGRAM_ID);
+};
+exports.getTreasuryLockTokenAccount = getTreasuryLockTokenAccount;
 // Get program instance
 const getProgram = (provider) => {
     return new anchor_1.Program(torch_market_json_1.default, provider);
 };
 exports.getProgram = getProgram;
-// Calculate tokens out for a given SOL amount (V2.3: dynamic treasury rate 20%→5%)
+// [V25] Flat treasury SOL rate: 20% → 5% across all tiers (reverted from V24 tiered fees)
+const TREASURY_SOL_MAX_BPS = 2000; // 20% at start
+const TREASURY_SOL_MIN_BPS = 500; // 5% at completion
+// Calculate tokens out for a given SOL amount (V2.3: dynamic treasury rate, V24: tiered)
 const calculateTokensOut = (solAmount, virtualSolReserves, virtualTokenReserves, realSolReserves = BigInt(0), // V2.3: needed for dynamic rate calculation
-protocolFeeBps = 100, // 1% protocol fee (75% protocol treasury, 25% dev)
-treasuryFeeBps = 100) => {
+protocolFeeBps = 100, // 1% protocol fee (90% protocol treasury, 10% dev)
+treasuryFeeBps = 100, // 1% treasury fee
+bondingTarget = BigInt('200000000000')) => {
     // Calculate protocol fee (1%)
     const protocolFee = (solAmount * BigInt(protocolFeeBps)) / BigInt(10000);
     // Calculate treasury fee (1%)
     const treasuryFee = (solAmount * BigInt(treasuryFeeBps)) / BigInt(10000);
     const solAfterFees = solAmount - protocolFee - treasuryFee;
+    // [V25] Flat 20% → 5% treasury rate across all tiers
+    const resolvedTarget = bondingTarget === BigInt(0) ? BigInt('200000000000') : bondingTarget;
     // V2.3: Dynamic treasury rate - decays from 20% to 5% as bonding progresses
-    const TREASURY_MAX_BPS = 2000; // 20%
-    const TREASURY_MIN_BPS = 500; // 5%
-    const BONDING_TARGET = BigInt('200000000000'); // 200 SOL in lamports
-    const rateRange = BigInt(TREASURY_MAX_BPS - TREASURY_MIN_BPS);
-    const decay = (realSolReserves * rateRange) / BONDING_TARGET;
-    const treasuryRateBps = Math.max(TREASURY_MAX_BPS - Number(decay), TREASURY_MIN_BPS);
+    const rateRange = BigInt(TREASURY_SOL_MAX_BPS - TREASURY_SOL_MIN_BPS);
+    const decay = (realSolReserves * rateRange) / resolvedTarget;
+    const treasuryRateBps = Math.max(TREASURY_SOL_MAX_BPS - Number(decay), TREASURY_SOL_MIN_BPS);
     // Split remaining SOL using dynamic rate
     const solToTreasurySplit = (solAfterFees * BigInt(treasuryRateBps)) / BigInt(10000);
     const solToCurve = solAfterFees - solToTreasurySplit;
@@ -164,27 +178,27 @@ const orderTokensForRaydium = (tokenA, tokenB) => {
 exports.orderTokensForRaydium = orderTokensForRaydium;
 // Raydium authority PDA
 const getRaydiumAuthorityPda = () => {
-    return web3_js_1.PublicKey.findProgramAddressSync([Buffer.from('vault_and_lp_mint_auth_seed')], constants_1.RAYDIUM_CPMM_PROGRAM);
+    return web3_js_1.PublicKey.findProgramAddressSync([Buffer.from('vault_and_lp_mint_auth_seed')], (0, constants_1.getRaydiumCpmmProgram)());
 };
 exports.getRaydiumAuthorityPda = getRaydiumAuthorityPda;
 // Raydium pool state PDA
 const getRaydiumPoolStatePda = (ammConfig, token0Mint, token1Mint) => {
-    return web3_js_1.PublicKey.findProgramAddressSync([Buffer.from('pool'), ammConfig.toBuffer(), token0Mint.toBuffer(), token1Mint.toBuffer()], constants_1.RAYDIUM_CPMM_PROGRAM);
+    return web3_js_1.PublicKey.findProgramAddressSync([Buffer.from('pool'), ammConfig.toBuffer(), token0Mint.toBuffer(), token1Mint.toBuffer()], (0, constants_1.getRaydiumCpmmProgram)());
 };
 exports.getRaydiumPoolStatePda = getRaydiumPoolStatePda;
 // Raydium LP mint PDA
 const getRaydiumLpMintPda = (poolState) => {
-    return web3_js_1.PublicKey.findProgramAddressSync([Buffer.from('pool_lp_mint'), poolState.toBuffer()], constants_1.RAYDIUM_CPMM_PROGRAM);
+    return web3_js_1.PublicKey.findProgramAddressSync([Buffer.from('pool_lp_mint'), poolState.toBuffer()], (0, constants_1.getRaydiumCpmmProgram)());
 };
 exports.getRaydiumLpMintPda = getRaydiumLpMintPda;
 // Raydium pool vault PDA
 const getRaydiumVaultPda = (poolState, tokenMint) => {
-    return web3_js_1.PublicKey.findProgramAddressSync([Buffer.from('pool_vault'), poolState.toBuffer(), tokenMint.toBuffer()], constants_1.RAYDIUM_CPMM_PROGRAM);
+    return web3_js_1.PublicKey.findProgramAddressSync([Buffer.from('pool_vault'), poolState.toBuffer(), tokenMint.toBuffer()], (0, constants_1.getRaydiumCpmmProgram)());
 };
 exports.getRaydiumVaultPda = getRaydiumVaultPda;
 // Raydium observation state PDA
 const getRaydiumObservationPda = (poolState) => {
-    return web3_js_1.PublicKey.findProgramAddressSync([Buffer.from('observation'), poolState.toBuffer()], constants_1.RAYDIUM_CPMM_PROGRAM);
+    return web3_js_1.PublicKey.findProgramAddressSync([Buffer.from('observation'), poolState.toBuffer()], (0, constants_1.getRaydiumCpmmProgram)());
 };
 exports.getRaydiumObservationPda = getRaydiumObservationPda;
 // Get all Raydium accounts needed for migration
@@ -192,7 +206,7 @@ const getRaydiumMigrationAccounts = (tokenMint) => {
     const { token0, token1, isToken0First } = (0, exports.orderTokensForRaydium)(constants_1.WSOL_MINT, tokenMint);
     const isWsolToken0 = isToken0First;
     const [raydiumAuthority] = (0, exports.getRaydiumAuthorityPda)();
-    const [poolState] = (0, exports.getRaydiumPoolStatePda)(constants_1.RAYDIUM_AMM_CONFIG, token0, token1);
+    const [poolState] = (0, exports.getRaydiumPoolStatePda)((0, constants_1.getRaydiumAmmConfig)(), token0, token1);
     const [lpMint] = (0, exports.getRaydiumLpMintPda)(poolState);
     const [token0Vault] = (0, exports.getRaydiumVaultPda)(poolState, token0);
     const [token1Vault] = (0, exports.getRaydiumVaultPda)(poolState, token1);

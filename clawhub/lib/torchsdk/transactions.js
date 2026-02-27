@@ -9,7 +9,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.buildVaultSwapTransaction = exports.buildWithdrawTokensTransaction = exports.buildClaimProtocolRewardsTransaction = exports.buildLiquidateTransaction = exports.buildRepayTransaction = exports.buildBorrowTransaction = exports.buildTransferAuthorityTransaction = exports.buildUnlinkWalletTransaction = exports.buildLinkWalletTransaction = exports.buildWithdrawVaultTransaction = exports.buildDepositVaultTransaction = exports.buildCreateVaultTransaction = exports.buildStarTransaction = exports.buildCreateTokenTransaction = exports.buildSellTransaction = exports.buildDirectBuyTransaction = exports.buildBuyTransaction = void 0;
+exports.buildSwapFeesToSolTransaction = exports.buildHarvestFeesTransaction = exports.buildVaultSwapTransaction = exports.buildMigrateTransaction = exports.buildWithdrawTokensTransaction = exports.buildClaimProtocolRewardsTransaction = exports.buildLiquidateTransaction = exports.buildRepayTransaction = exports.buildBorrowTransaction = exports.buildTransferAuthorityTransaction = exports.buildUnlinkWalletTransaction = exports.buildLinkWalletTransaction = exports.buildWithdrawVaultTransaction = exports.buildDepositVaultTransaction = exports.buildCreateVaultTransaction = exports.buildStarTransaction = exports.buildCreateTokenTransaction = exports.buildSellTransaction = exports.buildDirectBuyTransaction = exports.buildBuyTransaction = void 0;
 const web3_js_1 = require("@solana/web3.js");
 const spl_token_1 = require("@solana/spl-token");
 const anchor_1 = require("@coral-xyz/anchor");
@@ -43,17 +43,25 @@ const buildBuyTransactionInternal = async (connection, mintStr, buyerStr, amount
     const tokenData = await (0, tokens_1.fetchTokenRaw)(connection, mint);
     if (!tokenData)
         throw new Error(`Token not found: ${mintStr}`);
-    const { bondingCurve } = tokenData;
+    const { bondingCurve, treasury } = tokenData;
     if (bondingCurve.bonding_complete)
         throw new Error('Bonding curve complete, trade on DEX');
     // Calculate expected output
     const virtualSol = BigInt(bondingCurve.virtual_sol_reserves.toString());
     const virtualTokens = BigInt(bondingCurve.virtual_token_reserves.toString());
     const realSol = BigInt(bondingCurve.real_sol_reserves.toString());
+    const bondingTarget = BigInt(bondingCurve.bonding_target.toString());
     const solAmount = BigInt(amount_sol);
-    const result = (0, program_1.calculateTokensOut)(solAmount, virtualSol, virtualTokens, realSol);
+    const result = (0, program_1.calculateTokensOut)(solAmount, virtualSol, virtualTokens, realSol, 100, 100, bondingTarget);
+    // [V28] Detect if this buy will complete bonding
+    const resolvedTarget = bondingTarget === BigInt(0) ? BigInt('200000000000') : bondingTarget;
+    const newRealSol = realSol + result.solToCurve;
+    const willCompleteBonding = newRealSol >= resolvedTarget;
     // Apply slippage
-    const slippage = Math.max(10, Math.min(1000, slippage_bps));
+    if (slippage_bps < 10 || slippage_bps > 1000) {
+        throw new Error(`slippage_bps must be between 10 (0.1%) and 1000 (10%), got ${slippage_bps}`);
+    }
+    const slippage = slippage_bps;
     const minTokens = (result.tokensToUser * BigInt(10000 - slippage)) / BigInt(10000);
     // Derive PDAs
     const [bondingCurvePda] = (0, program_1.getBondingCurvePda)(mint);
@@ -126,10 +134,23 @@ const buildBuyTransactionInternal = async (connection, mintStr, buyerStr, amount
         tx.add(memoIx);
     }
     await finalizeTransaction(connection, tx, buyer);
+    // [V28] Build separate migration transaction when this buy completes bonding.
+    // Split into two txs because buy + migration exceeds the 1232-byte legacy limit.
+    // Program handles treasury reimbursement internally, so this is just a standard migration call.
+    let migrationTransaction;
+    if (willCompleteBonding) {
+        const migResult = await (0, exports.buildMigrateTransaction)(connection, {
+            mint: mintStr,
+            payer: buyerStr,
+        });
+        migrationTransaction = migResult.transaction;
+    }
     const vaultLabel = vaultCreatorStr ? ' (via vault)' : '';
+    const migrateLabel = willCompleteBonding ? ' + migrate to DEX' : '';
     return {
         transaction: tx,
-        message: `Buy ${Number(result.tokensToUser) / 1e6} tokens for ${Number(solAmount) / 1e9} SOL${vaultLabel}`,
+        migrationTransaction,
+        message: `Buy ${Number(result.tokensToUser) / 1e6} tokens for ${Number(solAmount) / 1e9} SOL${vaultLabel}${migrateLabel}`,
     };
 };
 /**
@@ -187,7 +208,10 @@ const buildSellTransaction = async (connection, params) => {
     const tokenAmount = BigInt(amount_tokens);
     const result = (0, program_1.calculateSolOut)(tokenAmount, virtualSol, virtualTokens);
     // Apply slippage
-    const slippage = Math.max(10, Math.min(1000, slippage_bps));
+    if (slippage_bps < 10 || slippage_bps > 1000) {
+        throw new Error(`slippage_bps must be between 10 (0.1%) and 1000 (10%), got ${slippage_bps}`);
+    }
+    const slippage = slippage_bps;
     const minSol = (result.solToUser * BigInt(10000 - slippage)) / BigInt(10000);
     // Derive PDAs
     const [bondingCurvePda] = (0, program_1.getBondingCurvePda)(mint);
@@ -269,7 +293,7 @@ exports.buildSellTransaction = buildSellTransaction;
  * @returns Partially-signed transaction, mint PublicKey, and mint Keypair
  */
 const buildCreateTokenTransaction = async (connection, params) => {
-    const { creator: creatorStr, name, symbol, metadata_uri } = params;
+    const { creator: creatorStr, name, symbol, metadata_uri, sol_target = 0 } = params;
     const creator = new web3_js_1.PublicKey(creatorStr);
     if (name.length > 32)
         throw new Error('Name must be 32 characters or less');
@@ -293,11 +317,14 @@ const buildCreateTokenTransaction = async (connection, params) => {
     const [treasury] = (0, program_1.getTokenTreasuryPda)(mint.publicKey);
     const bondingCurveTokenAccount = (0, spl_token_1.getAssociatedTokenAddressSync)(mint.publicKey, bondingCurve, true, spl_token_1.TOKEN_2022_PROGRAM_ID);
     const treasuryTokenAccount = (0, program_1.getTreasuryTokenAccount)(mint.publicKey, treasury);
+    // [V27] Treasury lock PDA and its token ATA
+    const [treasuryLock] = (0, program_1.getTreasuryLockPda)(mint.publicKey);
+    const treasuryLockTokenAccount = (0, program_1.getTreasuryLockTokenAccount)(mint.publicKey, treasuryLock);
     const tx = new web3_js_1.Transaction();
     const provider = makeDummyProvider(connection, creator);
     const program = new anchor_1.Program(torch_market_json_1.default, provider);
     const createIx = await program.methods
-        .createToken({ name, symbol, uri: metadata_uri })
+        .createToken({ name, symbol, uri: metadata_uri, solTarget: new anchor_1.BN(sol_target) })
         .accounts({
         creator,
         globalConfig,
@@ -306,6 +333,8 @@ const buildCreateTokenTransaction = async (connection, params) => {
         tokenVault: bondingCurveTokenAccount,
         treasury,
         treasuryTokenAccount,
+        treasuryLock,
+        treasuryLockTokenAccount,
         token2022Program: spl_token_1.TOKEN_2022_PROGRAM_ID,
         associatedTokenProgram: spl_token_1.ASSOCIATED_TOKEN_PROGRAM_ID,
         systemProgram: web3_js_1.SystemProgram.programId,
@@ -811,7 +840,7 @@ exports.buildLiquidateTransaction = buildLiquidateTransaction;
  * Build an unsigned claim protocol rewards transaction.
  *
  * Claims the user's proportional share of protocol treasury rewards
- * based on trading volume in the previous epoch. Requires >= 10 SOL volume.
+ * based on trading volume in the previous epoch. Requires >= 2 SOL volume. Min claim: 0.1 SOL.
  *
  * @param connection - Solana RPC connection
  * @param params - Claim parameters (user, optional vault)
@@ -902,6 +931,112 @@ exports.buildWithdrawTokensTransaction = buildWithdrawTokensTransaction;
 // ============================================================================
 // Vault Swap (V19)
 // ============================================================================
+// ============================================================================
+// Migration (V26)
+// ============================================================================
+/**
+ * Build an unsigned migration transaction.
+ *
+ * Permissionless — anyone can call once bonding completes and vote is finalized.
+ * Combines fund_migration_wsol + migrate_to_dex in a single transaction.
+ * Creates a Raydium CPMM pool with locked liquidity (LP tokens burned).
+ *
+ * [V28] Payer fronts ~1 SOL for Raydium costs (pool creation fee + account rent).
+ * Treasury reimburses the exact cost in the same transaction. Net payer cost: 0 SOL.
+ *
+ * Prefer using buildBuyTransaction — it auto-bundles migration when the buy
+ * completes bonding, so callers don't need to call this separately.
+ *
+ * @param connection - Solana RPC connection
+ * @param params - Migration parameters (mint, payer)
+ * @returns Unsigned transaction and descriptive message
+ */
+const buildMigrateTransaction = async (connection, params) => {
+    const { mint: mintStr, payer: payerStr } = params;
+    const mint = new web3_js_1.PublicKey(mintStr);
+    const payer = new web3_js_1.PublicKey(payerStr);
+    // Derive PDAs
+    const [bondingCurvePda] = (0, program_1.getBondingCurvePda)(mint);
+    const [globalConfigPda] = (0, program_1.getGlobalConfigPda)();
+    const [treasuryPda] = (0, program_1.getTokenTreasuryPda)(mint);
+    const treasuryTokenAccount = (0, program_1.getTreasuryTokenAccount)(mint, treasuryPda);
+    // [V31] Treasury lock PDA and its token ATA (receives vote-return tokens)
+    const [treasuryLock] = (0, program_1.getTreasuryLockPda)(mint);
+    const treasuryLockTokenAccount = (0, program_1.getTreasuryLockTokenAccount)(mint, treasuryLock);
+    // Token vault = bonding curve's Token-2022 ATA
+    const tokenVault = (0, spl_token_1.getAssociatedTokenAddressSync)(mint, bondingCurvePda, true, spl_token_1.TOKEN_2022_PROGRAM_ID);
+    // Bonding curve's WSOL ATA (SPL Token, not Token-2022)
+    const bcWsol = (0, spl_token_1.getAssociatedTokenAddressSync)(constants_1.WSOL_MINT, bondingCurvePda, true, spl_token_1.TOKEN_PROGRAM_ID);
+    // Payer's WSOL ATA
+    const payerWsol = (0, spl_token_1.getAssociatedTokenAddressSync)(constants_1.WSOL_MINT, payer, false, spl_token_1.TOKEN_PROGRAM_ID);
+    // Payer's token ATA (Token-2022)
+    const payerToken = (0, spl_token_1.getAssociatedTokenAddressSync)(mint, payer, false, spl_token_1.TOKEN_2022_PROGRAM_ID);
+    // Raydium accounts
+    const raydium = (0, program_1.getRaydiumMigrationAccounts)(mint);
+    const payerLpToken = (0, spl_token_1.getAssociatedTokenAddressSync)(raydium.lpMint, payer, false, spl_token_1.TOKEN_PROGRAM_ID);
+    const tx = new web3_js_1.Transaction();
+    // Compute budget — migration is heavy
+    tx.add(web3_js_1.ComputeBudgetProgram.setComputeUnitLimit({ units: 400000 }));
+    // Create ATAs: bc_wsol, payer_wsol, payer_token
+    tx.add((0, spl_token_1.createAssociatedTokenAccountIdempotentInstruction)(payer, bcWsol, bondingCurvePda, constants_1.WSOL_MINT, spl_token_1.TOKEN_PROGRAM_ID, spl_token_1.ASSOCIATED_TOKEN_PROGRAM_ID), (0, spl_token_1.createAssociatedTokenAccountIdempotentInstruction)(payer, payerWsol, payer, constants_1.WSOL_MINT, spl_token_1.TOKEN_PROGRAM_ID, spl_token_1.ASSOCIATED_TOKEN_PROGRAM_ID), (0, spl_token_1.createAssociatedTokenAccountIdempotentInstruction)(payer, payerToken, payer, mint, spl_token_1.TOKEN_2022_PROGRAM_ID, spl_token_1.ASSOCIATED_TOKEN_PROGRAM_ID));
+    // Build program instructions
+    const provider = makeDummyProvider(connection, payer);
+    const program = new anchor_1.Program(torch_market_json_1.default, provider);
+    // Step 1: Fund bonding curve's WSOL ATA (direct lamport manipulation, no CPI)
+    const fundIx = await program.methods
+        .fundMigrationWsol()
+        .accounts({
+        payer,
+        mint,
+        bondingCurve: bondingCurvePda,
+        bcWsol,
+    })
+        .instruction();
+    // Step 2: Migrate to DEX (all CPI-based)
+    const migrateIx = await program.methods
+        .migrateToDex()
+        .accounts({
+        payer,
+        globalConfig: globalConfigPda,
+        mint,
+        bondingCurve: bondingCurvePda,
+        treasury: treasuryPda,
+        tokenVault,
+        treasuryTokenAccount,
+        treasuryLockTokenAccount,
+        treasuryLock,
+        bcWsol,
+        payerWsol,
+        payerToken,
+        raydiumProgram: (0, constants_1.getRaydiumCpmmProgram)(),
+        ammConfig: (0, constants_1.getRaydiumAmmConfig)(),
+        raydiumAuthority: raydium.raydiumAuthority,
+        poolState: raydium.poolState,
+        wsolMint: constants_1.WSOL_MINT,
+        token0Vault: raydium.token0Vault,
+        token1Vault: raydium.token1Vault,
+        lpMint: raydium.lpMint,
+        payerLpToken,
+        observationState: raydium.observationState,
+        createPoolFee: (0, constants_1.getRaydiumFeeReceiver)(),
+        tokenProgram: spl_token_1.TOKEN_PROGRAM_ID,
+        token2022Program: spl_token_1.TOKEN_2022_PROGRAM_ID,
+        associatedTokenProgram: spl_token_1.ASSOCIATED_TOKEN_PROGRAM_ID,
+        systemProgram: web3_js_1.SystemProgram.programId,
+        rent: web3_js_1.SYSVAR_RENT_PUBKEY,
+    })
+        .instruction();
+    tx.add(fundIx, migrateIx);
+    await finalizeTransaction(connection, tx, payer);
+    return {
+        transaction: tx,
+        message: `Migrate token ${mintStr.slice(0, 8)}... to Raydium DEX`,
+    };
+};
+exports.buildMigrateTransaction = buildMigrateTransaction;
+// ============================================================================
+// Vault Swap (V19)
+// ============================================================================
 /**
  * Build an unsigned vault-routed DEX swap transaction.
  *
@@ -958,9 +1093,9 @@ const buildVaultSwapTransaction = async (connection, params) => {
         bondingCurve: bondingCurvePda,
         vaultTokenAccount,
         vaultWsolAccount,
-        raydiumProgram: constants_1.RAYDIUM_CPMM_PROGRAM,
+        raydiumProgram: (0, constants_1.getRaydiumCpmmProgram)(),
         raydiumAuthority: raydium.raydiumAuthority,
-        ammConfig: constants_1.RAYDIUM_AMM_CONFIG,
+        ammConfig: (0, constants_1.getRaydiumAmmConfig)(),
         poolState: raydium.poolState,
         poolTokenVault0: raydium.token0Vault,
         poolTokenVault1: raydium.token1Vault,
@@ -984,4 +1119,243 @@ const buildVaultSwapTransaction = async (connection, params) => {
     };
 };
 exports.buildVaultSwapTransaction = buildVaultSwapTransaction;
+// ============================================================================
+// Treasury Cranks
+// ============================================================================
+/**
+ * Build an unsigned harvest-fees transaction.
+ *
+ * Permissionless crank — harvests accumulated Token-2022 transfer fees
+ * from token accounts into the mint, then withdraws from the mint into
+ * the treasury's token account.
+ *
+ * If `params.sources` is provided, uses those accounts directly.
+ * Otherwise auto-discovers token accounts with withheld fees.
+ */
+const buildHarvestFeesTransaction = async (connection, params) => {
+    const { mint: mintStr, payer: payerStr, sources: sourcesStr } = params;
+    const mint = new web3_js_1.PublicKey(mintStr);
+    const payer = new web3_js_1.PublicKey(payerStr);
+    const [bondingCurvePda] = (0, program_1.getBondingCurvePda)(mint);
+    const [treasuryPda] = (0, program_1.getTokenTreasuryPda)(mint);
+    const treasuryTokenAccount = (0, program_1.getTreasuryTokenAccount)(mint, treasuryPda);
+    // Discover source accounts with withheld transfer fees
+    let sourceAccounts;
+    if (sourcesStr && sourcesStr.length > 0) {
+        sourceAccounts = sourcesStr.map((s) => new web3_js_1.PublicKey(s));
+    }
+    else {
+        // Auto-discover: fetch largest token accounts and filter to those with withheld > 0
+        try {
+            const largestAccounts = await connection.getTokenLargestAccounts(mint, 'confirmed');
+            const addresses = largestAccounts.value.map((a) => a.address);
+            if (addresses.length > 0) {
+                const accountInfos = await connection.getMultipleAccountsInfo(addresses);
+                sourceAccounts = [];
+                for (let i = 0; i < addresses.length; i++) {
+                    const info = accountInfos[i];
+                    if (!info)
+                        continue;
+                    try {
+                        const account = (0, spl_token_1.unpackAccount)(addresses[i], info, spl_token_1.TOKEN_2022_PROGRAM_ID);
+                        const feeAmount = (0, spl_token_1.getTransferFeeAmount)(account);
+                        if (feeAmount && feeAmount.withheldAmount > BigInt(0)) {
+                            sourceAccounts.push(addresses[i]);
+                        }
+                    }
+                    catch {
+                        // Not a Token-2022 account or can't decode — skip
+                    }
+                }
+            }
+            else {
+                sourceAccounts = [];
+            }
+        }
+        catch {
+            // RPC doesn't support getTokenLargestAccounts — proceed without source accounts
+            sourceAccounts = [];
+        }
+    }
+    const provider = makeDummyProvider(connection, payer);
+    const program = new anchor_1.Program(torch_market_json_1.default, provider);
+    const tx = new web3_js_1.Transaction();
+    // Scale compute budget: base 200k + 20k per source account (Token-2022 harvest CPI is expensive)
+    const computeUnits = 200000 + 20000 * sourceAccounts.length;
+    tx.add(web3_js_1.ComputeBudgetProgram.setComputeUnitLimit({ units: computeUnits }));
+    const harvestIx = await program.methods
+        .harvestFees()
+        .accounts({
+        payer,
+        mint,
+        bondingCurve: bondingCurvePda,
+        tokenTreasury: treasuryPda,
+        treasuryTokenAccount,
+        token2022Program: spl_token_1.TOKEN_2022_PROGRAM_ID,
+        associatedTokenProgram: spl_token_1.ASSOCIATED_TOKEN_PROGRAM_ID,
+    })
+        .remainingAccounts(sourceAccounts.map((pubkey) => ({
+        pubkey,
+        isSigner: false,
+        isWritable: true,
+    })))
+        .instruction();
+    tx.add(harvestIx);
+    await finalizeTransaction(connection, tx, payer);
+    return {
+        transaction: tx,
+        message: `Harvest transfer fees for ${mintStr.slice(0, 8)}... (${sourceAccounts.length} source accounts)`,
+    };
+};
+exports.buildHarvestFeesTransaction = buildHarvestFeesTransaction;
+/** Max transaction size in bytes (Solana packet data limit) */
+const PACKET_DATA_SIZE = 1232;
+/**
+ * [V20] Harvest transfer fees AND swap them to SOL.
+ *
+ * Tries to bundle: create_idempotent(treasury_wsol) + harvest_fees + swap_fees_to_sol.
+ * If the combined transaction exceeds the 1232-byte limit (many source accounts),
+ * automatically splits into a harvest-only tx + swap-only tx via additionalTransactions.
+ * Set harvest=false to skip harvest (if already harvested separately).
+ */
+const buildSwapFeesToSolTransaction = async (connection, params) => {
+    const { mint: mintStr, payer: payerStr, minimum_amount_out = 1, harvest = true, sources: sourcesStr, } = params;
+    const mint = new web3_js_1.PublicKey(mintStr);
+    const payer = new web3_js_1.PublicKey(payerStr);
+    const [bondingCurvePda] = (0, program_1.getBondingCurvePda)(mint);
+    const [treasuryPda] = (0, program_1.getTokenTreasuryPda)(mint);
+    const treasuryTokenAccount = (0, program_1.getTreasuryTokenAccount)(mint, treasuryPda);
+    // Treasury's WSOL ATA (SPL Token, not Token-2022)
+    const treasuryWsol = (0, spl_token_1.getAssociatedTokenAddressSync)(constants_1.WSOL_MINT, treasuryPda, true, spl_token_1.TOKEN_PROGRAM_ID);
+    // Raydium accounts — swap direction is token → WSOL (sell)
+    const raydium = (0, program_1.getRaydiumMigrationAccounts)(mint);
+    const tokenVault = raydium.isWsolToken0 ? raydium.token1Vault : raydium.token0Vault;
+    const wsolVault = raydium.isWsolToken0 ? raydium.token0Vault : raydium.token1Vault;
+    const provider = makeDummyProvider(connection, payer);
+    const program = new anchor_1.Program(torch_market_json_1.default, provider);
+    // Helper: build the harvest instruction with given sources
+    const buildHarvestIx = async (sources) => {
+        return program.methods
+            .harvestFees()
+            .accounts({
+            payer,
+            mint,
+            bondingCurve: bondingCurvePda,
+            tokenTreasury: treasuryPda,
+            treasuryTokenAccount,
+            token2022Program: spl_token_1.TOKEN_2022_PROGRAM_ID,
+            associatedTokenProgram: spl_token_1.ASSOCIATED_TOKEN_PROGRAM_ID,
+        })
+            .remainingAccounts(sources.map((pubkey) => ({
+            pubkey,
+            isSigner: false,
+            isWritable: true,
+        })))
+            .instruction();
+    };
+    // Helper: build the swap instruction
+    const buildSwapIx = async () => {
+        return program.methods
+            .swapFeesToSol(new anchor_1.BN(minimum_amount_out.toString()))
+            .accounts({
+            payer,
+            mint,
+            bondingCurve: bondingCurvePda,
+            treasury: treasuryPda,
+            treasuryTokenAccount,
+            treasuryWsol,
+            raydiumProgram: (0, constants_1.getRaydiumCpmmProgram)(),
+            raydiumAuthority: raydium.raydiumAuthority,
+            ammConfig: (0, constants_1.getRaydiumAmmConfig)(),
+            poolState: raydium.poolState,
+            tokenVault,
+            wsolVault,
+            wsolMint: constants_1.WSOL_MINT,
+            observationState: raydium.observationState,
+            tokenProgram: spl_token_1.TOKEN_PROGRAM_ID,
+            token2022Program: spl_token_1.TOKEN_2022_PROGRAM_ID,
+            systemProgram: web3_js_1.SystemProgram.programId,
+        })
+            .instruction();
+    };
+    // Helper: create WSOL ATA instruction
+    const createWsolAtaIx = (0, spl_token_1.createAssociatedTokenAccountIdempotentInstruction)(payer, treasuryWsol, treasuryPda, constants_1.WSOL_MINT, spl_token_1.TOKEN_PROGRAM_ID, spl_token_1.ASSOCIATED_TOKEN_PROGRAM_ID);
+    // Discover source accounts
+    let sourceAccounts = [];
+    if (harvest) {
+        if (sourcesStr && sourcesStr.length > 0) {
+            sourceAccounts = sourcesStr.map((s) => new web3_js_1.PublicKey(s));
+        }
+        else {
+            try {
+                const largestAccounts = await connection.getTokenLargestAccounts(mint, 'confirmed');
+                const addresses = largestAccounts.value.map((a) => a.address);
+                if (addresses.length > 0) {
+                    const accountInfos = await connection.getMultipleAccountsInfo(addresses);
+                    for (let i = 0; i < addresses.length; i++) {
+                        const info = accountInfos[i];
+                        if (!info)
+                            continue;
+                        try {
+                            const account = (0, spl_token_1.unpackAccount)(addresses[i], info, spl_token_1.TOKEN_2022_PROGRAM_ID);
+                            const feeAmount = (0, spl_token_1.getTransferFeeAmount)(account);
+                            if (feeAmount && feeAmount.withheldAmount > BigInt(0)) {
+                                sourceAccounts.push(addresses[i]);
+                            }
+                        }
+                        catch {
+                            // Not a Token-2022 account or can't decode — skip
+                        }
+                    }
+                }
+            }
+            catch {
+                sourceAccounts = [];
+            }
+        }
+    }
+    // Try combined transaction first
+    const tx = new web3_js_1.Transaction();
+    tx.add(web3_js_1.ComputeBudgetProgram.setComputeUnitLimit({ units: 400000 }));
+    tx.add(createWsolAtaIx);
+    if (harvest && sourceAccounts.length > 0) {
+        tx.add(await buildHarvestIx(sourceAccounts));
+    }
+    tx.add(await buildSwapIx());
+    await finalizeTransaction(connection, tx, payer);
+    // Check if it fits in a single transaction
+    let fitsInSingleTx = false;
+    try {
+        const serialized = tx.serialize({ requireAllSignatures: false, verifySignatures: false });
+        fitsInSingleTx = serialized.length <= PACKET_DATA_SIZE;
+    }
+    catch {
+        // serialize() throws when tx exceeds size limit
+    }
+    if (fitsInSingleTx) {
+        return {
+            transaction: tx,
+            message: `Swap harvested fees to SOL for ${mintStr.slice(0, 8)}...${harvest ? ' (harvest + swap)' : ''}`,
+        };
+    }
+    // Too large — split into harvest tx + swap-only tx
+    // Transaction 1: harvest with all source accounts
+    const harvestTx = new web3_js_1.Transaction();
+    const computeUnits = 200000 + 20000 * sourceAccounts.length;
+    harvestTx.add(web3_js_1.ComputeBudgetProgram.setComputeUnitLimit({ units: computeUnits }));
+    harvestTx.add(await buildHarvestIx(sourceAccounts));
+    await finalizeTransaction(connection, harvestTx, payer);
+    // Transaction 2: swap only (no harvest — tokens already in treasury ATA)
+    const swapTx = new web3_js_1.Transaction();
+    swapTx.add(web3_js_1.ComputeBudgetProgram.setComputeUnitLimit({ units: 400000 }));
+    swapTx.add(createWsolAtaIx);
+    swapTx.add(await buildSwapIx());
+    await finalizeTransaction(connection, swapTx, payer);
+    return {
+        transaction: harvestTx,
+        additionalTransactions: [swapTx],
+        message: `Harvest + swap fees to SOL for ${mintStr.slice(0, 8)}... (split: ${sourceAccounts.length} sources)`,
+    };
+};
+exports.buildSwapFeesToSolTransaction = buildSwapFeesToSolTransaction;
 //# sourceMappingURL=transactions.js.map

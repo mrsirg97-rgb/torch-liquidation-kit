@@ -27,14 +27,22 @@ exports.isIrysUrl = isIrysUrl;
 /**
  * Fetch with automatic fallback from gateway.irys.xyz to uploader.irys.xyz
  */
-const fetchWithFallback = async (url, options) => {
-    // If it's an Irys gateway URL, use uploader directly (gateway has SSL issues)
-    if ((0, exports.isIrysUrl)(url)) {
-        const uploaderUrl = (0, exports.irysToUploader)(url);
-        return fetch(uploaderUrl, options);
+const fetchWithFallback = async (url, options, timeoutMs = 10000) => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    const opts = { ...options, signal: controller.signal };
+    try {
+        // If it's an Irys gateway URL, use uploader directly (gateway has SSL issues)
+        if ((0, exports.isIrysUrl)(url)) {
+            const uploaderUrl = (0, exports.irysToUploader)(url);
+            return await fetch(uploaderUrl, opts);
+        }
+        // For non-Irys URLs, fetch normally
+        return await fetch(url, opts);
     }
-    // For non-Irys URLs, fetch normally
-    return fetch(url, options);
+    finally {
+        clearTimeout(timer);
+    }
 };
 exports.fetchWithFallback = fetchWithFallback;
 //# sourceMappingURL=gateway.js.map

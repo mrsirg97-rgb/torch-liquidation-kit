@@ -26,8 +26,9 @@ const getBuyQuote = async (connection, mintStr, amountSolLamports) => {
     const virtualSol = BigInt(bondingCurve.virtual_sol_reserves.toString());
     const virtualTokens = BigInt(bondingCurve.virtual_token_reserves.toString());
     const realSol = BigInt(bondingCurve.real_sol_reserves.toString());
+    const bondingTarget = BigInt(bondingCurve.bonding_target.toString());
     const amountSol = BigInt(amountSolLamports);
-    const result = (0, program_1.calculateTokensOut)(amountSol, virtualSol, virtualTokens, realSol);
+    const result = (0, program_1.calculateTokensOut)(amountSol, virtualSol, virtualTokens, realSol, 100, 100, bondingTarget);
     const priceBefore = (0, program_1.calculatePrice)(virtualSol, virtualTokens);
     const priceAfter = (0, program_1.calculatePrice)(virtualSol + result.solToCurve, virtualTokens - result.tokensOut);
     const priceImpact = ((priceAfter - priceBefore) / priceBefore) * 100;

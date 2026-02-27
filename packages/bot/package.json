@@ -1,6 +1,6 @@
 {
   "name": "torch-liquidation-bot",
-  "version": "3.0.2",
+  "version": "4.0.0",
   "description": "autonomous vault-based liquidation keeper for Torch Market lending on Solana using torchsdk",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -18,7 +18,7 @@
   },
   "dependencies": {
     "@solana/web3.js": "1.98.4",
-    "torchsdk": "3.2.3"
+    "torchsdk": "3.7.22"
   },
   "devDependencies": {
     "@types/node": "20.19.33",
@@ -28,7 +28,7 @@
   "peerDependencies": {
     "@solana/web3.js": "^1.98.0"
   },
-    "repository": {
+  "repository": {
     "type": "git",
     "url": "https://github.com/mrsirg97-rgb/torch-liquidation-kit"
   },

@@ -19,11 +19,10 @@ import {
   getToken,
   getTokens,
   getLendingInfo,
-  getHolders,
-  getLoanPosition,
+  getAllLoanPositions,
   getVaultForWallet,
   type LendingInfo,
-  type LoanPositionInfo,
+  type LoanPositionWithKey,
 } from 'torchsdk'
 
 const RPC_URL = process.env.RPC_URL ?? 'http://localhost:8899'
@@ -121,7 +120,7 @@ const main = async () => {
           `avail=${sol(lending.treasury_sol_available)} SOL`,
       )
 
-      if ((lending?.active_loan ?? 0) > 0 && !tokenWithLoans) {
+      if ((lending?.active_loans ?? 0) > 0 && !tokenWithLoans) {
         tokenWithLoans = { mint: t.mint, symbol: t.symbol }
       }
     } catch {
@@ -136,36 +135,45 @@ const main = async () => {
   }
 
   // ------------------------------------------------------------------
-  // 4. Get holders and check loan positions
+  // 4. Scan loan positions (getAllLoanPositions)
   // ------------------------------------------------------------------
-  log('\n[4] Get Holders & Loan Positions (getHolders, getLoanPosition)')
+  log('\n[4] Scan Loan Positions (getAllLoanPositions)')
   if (firstMint) {
     try {
-      const result = await getHolders(connection, firstMint)
-      const holders = result.holders
-      ok('getHolders', `${holders.length} holders for ${discoveredTokens[0]?.symbol}`)
+      const { positions, pool_price_sol } = await getAllLoanPositions(connection, firstMint)
+      ok(
+        'getAllLoanPositions',
+        `${positions.length} active loans for ${discoveredTokens[0]?.symbol}` +
+          (pool_price_sol != null ? ` | pool price=${sol(pool_price_sol)} SOL` : ''),
+      )
 
-      // check loan positions for first few holders
-      let positionsChecked = 0
-      for (const h of holders.slice(0, 5)) {
-        try {
-          const pos: LoanPositionInfo = await getLoanPosition(connection, firstMint, h.address)
-          if (pos && pos.health !== 'none') {
-            log(
-              `    borrower=${h.address.slice(0, 8)}... | ` +
-                `owed=${sol(pos.total_owed)} SOL | ` +
-                `collateral=${pos.collateral_amount} | ` +
-                `health=${pos.health}`,
-            )
-          }
-          positionsChecked++
-        } catch {
-          // no position for this holder
+      for (const pos of positions.slice(0, 5)) {
+        log(
+          `    borrower=${pos.borrower.slice(0, 8)}... | ` +
+            `owed=${sol(pos.total_owed)} SOL | ` +
+            `collateral=${pos.collateral_amount} | ` +
+            `health=${pos.health}`,
+        )
+      }
+
+      // verify sort order: liquidatable → at_risk → healthy
+      const healthOrder = ['liquidatable', 'at_risk', 'healthy']
+      let sorted = true
+      for (let i = 1; i < positions.length; i++) {
+        if (healthOrder.indexOf(positions[i].health) < healthOrder.indexOf(positions[i - 1].health)) {
+          sorted = false
+          break
         }
       }
-      ok('getLoanPosition', `checked ${positionsChecked} positions`)
+      if (positions.length > 1) {
+        if (sorted) {
+          ok('sort order', 'positions sorted by health (liquidatable first)')
+        } else {
+          fail('sort order', { message: 'positions not sorted by health' })
+        }
+      }
     } catch (e: any) {
-      fail('getHolders', e)
+      fail('getAllLoanPositions', e)
     }
   }
 
@@ -207,7 +215,7 @@ const main = async () => {
     } else {
       ok(
         'getVaultForWallet',
-        `wallet is linked to vault (creator=${link.vault_creator?.slice(0, 8)}...)`,
+        `wallet is linked to vault (creator=${link.creator?.slice(0, 8)}...)`,
       )
     }
   } catch (e: any) {

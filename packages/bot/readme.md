@@ -1,13 +1,13 @@
-# torch-liquidation-bot v3.0.2 (Vault Mode)
+# torch-liquidation-bot v4.0.0 (Vault Mode)
 
 Vault-based liquidation bot for [Torch Market](https://torch.market) on Solana. Generates an agent keypair in-process — no user wallet required. All operations route through a Torch Vault.
 
-> **v3.0.0+ Breaking Change:** The bot now operates through the torchsdk v3.2.3+ vault model. It generates a disposable agent keypair at startup, scans for underwater loan positions, and executes liquidations. The user never provides a wallet — only a vault creator pubkey and an RPC endpoint.
+> **v3.0.0+ Breaking Change:** The bot now operates through the torchsdk v3.7.22 vault model. It generates a disposable agent keypair at startup, scans for underwater loan positions using the SDK's bulk loan scanner (`getAllLoanPositions`), and executes liquidations. The user never provides a wallet — only a vault creator pubkey and an RPC endpoint.
 
 ## Install
 
 ```bash
-npm install torch-liquidation-bot
+npm install torch-liquidation-bot@4.0.0
 ```
 
 ## Quick Start
@@ -30,11 +30,10 @@ This bot:
 
 1. Generates a disposable `Keypair` in-process (no private key leaves the process)
 2. Verifies the vault exists and the agent wallet is linked
-3. Scans migrated tokens for active loans
-4. Checks each borrower's position health via `getLoanPosition()`
-5. Executes `buildLiquidateTransaction()` for any position with `health === 'liquidatable'`
-6. Confirms the transaction via `confirmTransaction()`
-7. Repeats on a configurable interval
+3. Scans migrated tokens with `getAllLoanPositions()` — one RPC call per token, positions pre-sorted liquidatable-first
+4. Executes `buildLiquidateTransaction()` for each liquidatable position
+5. Confirms the transaction via `confirmTransaction()`
+6. Repeats on a configurable interval
 
 All value flows through the vault. The agent wallet is a stateless controller.
 
@@ -50,7 +49,7 @@ All value flows through the vault. The agent wallet is a stateless controller.
 
 ## Vault Setup
 
-The bot uses the torchsdk v3.2.3 vault model:
+The bot uses the torchsdk v3.7.22 vault model:
 
 ```
 User (hardware wallet) → Creates vault, deposits SOL
@@ -69,9 +68,7 @@ The agent wallet needs minimal SOL for gas (~0.01 SOL). All liquidation value fl
 import { Connection, Keypair } from '@solana/web3.js'
 import {
   getTokens,
-  getLendingInfo,
-  getHolders,
-  getLoanPosition,
+  getAllLoanPositions,
   getVault,
   getVaultForWallet,
   buildLiquidateTransaction,
@@ -90,18 +87,15 @@ const link = await getVaultForWallet(connection, agent.publicKey.toBase58())
 const { tokens } = await getTokens(connection, { status: 'migrated', sort: 'volume', limit: 50 })
 
 for (const token of tokens) {
-  const lending = await getLendingInfo(connection, token.mint)
-  if (!lending.active_loans) continue
+  const { positions } = await getAllLoanPositions(connection, token.mint)
 
-  const { holders } = await getHolders(connection, token.mint)
-  for (const holder of holders) {
-    const pos = await getLoanPosition(connection, token.mint, holder.address)
-    if (pos.health !== 'liquidatable') continue
+  for (const pos of positions) {
+    if (pos.health !== 'liquidatable') break // pre-sorted, done
 
     const { transaction } = await buildLiquidateTransaction(connection, {
       mint: token.mint,
       liquidator: agent.publicKey.toBase58(),
-      borrower: holder.address,
+      borrower: pos.borrower,
       vault: vaultCreator,
     })
     transaction.sign(agent)

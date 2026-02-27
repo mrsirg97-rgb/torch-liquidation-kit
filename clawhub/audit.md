@@ -1,13 +1,13 @@
 # Torch Liquidation Bot — Security Audit
 
-**Audit Date:** February 12, 2026
+**Audit Date:** February 27, 2026
 **Auditor:** Claude Opus 4.6 (Anthropic)
-**Bot Version:** 3.0.2
-**Kit Version:** 1.0.0
-**SDK Version:** torchsdk 3.2.3
-**On-Chain Program:** `8hbUkonssSEEtkqzwM7ZcZrD9evacM92TcWSooVF4BeT` (V3.2.0)
+**Bot Version:** 4.0.0
+**Kit Version:** 2.0.0
+**SDK Version:** torchsdk 3.7.22
+**On-Chain Program:** `8hbUkonssSEEtkqzwM7ZcZrD9evacM92TcWSooVF4BeT` (V3.7.7, 27 instructions)
 **Language:** TypeScript
-**Test Result:** 7 passed, 1 informational (Surfpool mainnet fork)
+**Test Result:** 9 passed, 0 failed (Surfpool mainnet fork)
 
 ---
 
@@ -16,22 +16,26 @@
 1. [Executive Summary](#executive-summary)
 2. [Scope](#scope)
 3. [Methodology](#methodology)
-4. [Keypair Safety Review](#keypair-safety-review)
-5. [Vault Integration Review](#vault-integration-review)
-6. [Scan Loop Security](#scan-loop-security)
-7. [Configuration Validation](#configuration-validation)
-8. [Dependency Analysis](#dependency-analysis)
-9. [Threat Model](#threat-model)
-10. [Findings](#findings)
-11. [Conclusion](#conclusion)
+4. [What Changed (v3.0.2 → v4.0.0)](#what-changed-v302--v400)
+5. [Keypair Safety Review](#keypair-safety-review)
+6. [Vault Integration Review](#vault-integration-review)
+7. [Scan Loop Security](#scan-loop-security)
+8. [Configuration Validation](#configuration-validation)
+9. [Dependency Analysis](#dependency-analysis)
+10. [Threat Model](#threat-model)
+11. [Findings](#findings)
+12. [Resolved Findings from v3.0.2](#resolved-findings-from-v302)
+13. [Conclusion](#conclusion)
 
 ---
 
 ## Executive Summary
 
-This audit covers the Torch Liquidation Bot v3.0.2, an autonomous keeper that scans Torch Market lending positions and liquidates underwater loans through a Torch Vault. The bot was reviewed for key safety, vault integration correctness, error handling, and dependency surface.
+This audit covers the Torch Liquidation Bot v4.0.0, an autonomous keeper that scans Torch Market lending positions and liquidates underwater loans through a Torch Vault. The bot was reviewed for key safety, vault integration correctness, error handling, and dependency surface.
 
-The bot is **vault-first** (all value routes through the vault PDA), **disposable-key** (agent keypair generated in-process, holds nothing), and **single-purpose** (scan and liquidate only — no trading, borrowing, or token creation).
+The major change in v4.0.0 is the replacement of the N+1 scan pattern (`getLendingInfo` → `getHolders` → per-holder `getLoanPosition`) with a single `getAllLoanPositions()` call per token. This reduces RPC calls from 2 + N per token to 1 per token, eliminates the 20-holder discovery ceiling from the previous version, and leverages the SDK's pre-sorted output to break early once all liquidatable positions are processed.
+
+The bot remains **vault-first** (all value routes through the vault PDA), **disposable-key** (agent keypair generated in-process, holds nothing), and **single-purpose** (scan and liquidate only — no trading, borrowing, or token creation).
 
 ### Overall Assessment
 
@@ -39,7 +43,7 @@ The bot is **vault-first** (all value routes through the vault PDA), **disposabl
 |----------|--------|-------|
 | Key Safety | **PASS** | In-process `Keypair.generate()`, no key files, no key logging |
 | Vault Integration | **PASS** | `vault` param correctly passed to `buildLiquidateTransaction` |
-| Error Handling | **PASS** | Cycle-level catch, per-token/per-holder try/catch |
+| Error Handling | **PASS** | Cycle-level catch, per-token try/catch, per-liquidation try/catch |
 | Config Validation | **PASS** | Required env vars checked, scan interval floored at 5000ms |
 | Dependencies | **MINIMAL** | 2 runtime deps, both pinned exact |
 | Supply Chain | **LOW RISK** | No post-install hooks, no remote code fetching |
@@ -51,8 +55,8 @@ The bot is **vault-first** (all value routes through the vault PDA), **disposabl
 | Critical | 0 |
 | High | 0 |
 | Medium | 0 |
-| Low | 2 |
-| Informational | 4 |
+| Low | 1 |
+| Informational | 2 |
 
 ---
 
@@ -62,30 +66,80 @@ The bot is **vault-first** (all value routes through the vault PDA), **disposabl
 
 | File | Lines | Role |
 |------|-------|------|
-| `packages/bot/src/index.ts` | 209 | Entry point: keypair load/generate, vault check, scan loop |
-| `packages/bot/src/config.ts` | 30 | Environment variable validation |
-| `packages/bot/src/types.ts` | 12 | BotConfig and LogLevel interfaces |
-| `packages/bot/src/utils.ts` | 40 | Formatting helpers, logger, base58 decoder |
-| `packages/bot/tests/test_e2e.ts` | 240 | E2E test suite |
+| `packages/bot/src/index.ts` | 187 | Entry point: keypair load/generate, vault check, scan loop |
+| `packages/bot/src/config.ts` | 36 | Environment variable validation |
+| `packages/bot/src/types.ts` | 13 | BotConfig and LogLevel interfaces |
+| `packages/bot/src/utils.ts` | 47 | Formatting helpers, logger, base58 decoder |
+| `packages/bot/tests/test_e2e.ts` | 248 | E2E test suite |
 | `packages/bot/package.json` | 37 | Dependencies and scripts |
 | `packages/bot/tsconfig.json` | 20 | TypeScript configuration |
-| **Total** | **~580** | |
+| **Total** | **~588** | |
 
 ### SDK Cross-Reference
 
-The bot relies on `torchsdk@3.2.3` for all on-chain interaction. The SDK was independently audited (see [Torch SDK Audit](https://torch.market/audit.md)). This audit focuses on the bot's usage of the SDK, not the SDK internals.
+The bot relies on `torchsdk@3.7.22` for all on-chain interaction. The SDK was independently audited (see [Torch SDK Audit](https://torch.market/audit.md)). This audit focuses on the bot's usage of the SDK, not the SDK internals.
+
+Key SDK changes since v3.2.3:
+- `getAllLoanPositions()` added in v3.7.17 — bulk loan scanning via `getProgramAccounts`
+- V33 buyback removal (v3.7.22) — `buildAutoBuybackTransaction` deleted
+- Lending utilization cap increased 50% → 70% (v3.7.22)
+- Protocol fee split changed to 90% treasury / 10% dev (V32)
+- IDL updated to v3.7.7 (27 instructions, down from 28)
 
 ---
 
 ## Methodology
 
 1. **Line-by-line source review** of all 4 bot source files
-2. **Keypair lifecycle analysis** — generation, usage, exposure surface
-3. **Vault integration verification** — correct params passed to SDK
-4. **Error handling analysis** — crash paths, retry behavior, log safety
-5. **Dependency audit** — runtime deps, dev deps, post-install hooks
-6. **E2E test review** — coverage, assertions, false positives
-7. **Configuration attack surface** — environment variable handling
+2. **Delta analysis** against v3.0.2 audit — focused review of changed code paths
+3. **Keypair lifecycle analysis** — generation, usage, exposure surface
+4. **Vault integration verification** — correct params passed to SDK
+5. **Error handling analysis** — crash paths, retry behavior, log safety
+6. **Dependency audit** — runtime deps, dev deps, post-install hooks
+7. **E2E test review** — coverage, assertions, sort order validation
+8. **Configuration attack surface** — environment variable handling
+
+---
+
+## What Changed (v3.0.2 → v4.0.0)
+
+### Scan Pattern Rewrite
+
+The core scan loop was rewritten to use `getAllLoanPositions()`:
+
+**Before (v3.0.2):**
+```
+getTokens → for each token:
+  getLendingInfo     → skip if no active loans
+  getHolders         → get up to 20 holders
+  getLoanPosition    → check each holder individually
+  buildLiquidateTransaction → if liquidatable
+```
+
+**After (v4.0.0):**
+```
+getTokens → for each token:
+  getAllLoanPositions → all active loans, sorted by health
+  break              → stop at first non-liquidatable (pre-sorted)
+  buildLiquidateTransaction → for each liquidatable
+```
+
+### Import Changes
+
+**Removed:** `getLendingInfo`, `getHolders`, `getLoanPosition`, `type LendingInfo`, `type LoanPositionInfo`
+**Added:** `getAllLoanPositions`, `type LoanPositionWithKey`
+
+### Impact
+
+| Metric | v3.0.2 | v4.0.0 |
+|--------|--------|--------|
+| RPC calls per token | 2 + N (lending + holders + per-holder position) | 1 (`getAllLoanPositions`) |
+| Max discoverable borrowers | 20 (`getTokenLargestAccounts` limit) | Unlimited (scans all LoanPosition PDAs) |
+| Source lines (index.ts) | 210 | 187 |
+| SDK imports | 10 | 7 |
+| Error isolation levels | 4 (cycle, token, holder, liquidation) | 3 (cycle, token, liquidation) |
+
+The reduction from 4 to 3 error isolation levels is correct — the holder level is no longer needed because `getAllLoanPositions` returns positions directly.
 
 ---
 
@@ -93,13 +147,13 @@ The bot relies on `torchsdk@3.2.3` for all on-chain interaction. The SDK was ind
 
 ### Generation
 
-The keypair is created in `main()` via one of two paths:
+Unchanged from v3.0.2. The keypair is created in `main()` via one of two paths:
 
 1. **Default (recommended):** `Keypair.generate()` — fresh Ed25519 keypair from system entropy
 2. **Optional:** `SOLANA_PRIVATE_KEY` env var — loaded as JSON byte array or base58, decoded via `Keypair.fromSecretKey()`
 
 ```typescript
-// index.ts:136-155 — load or generate agent keypair
+// index.ts:137-153 — load or generate agent keypair
 let agentKeypair: Keypair
 if (config.privateKey) {
   // try JSON byte array, then base58
@@ -121,7 +175,7 @@ The keypair is:
 The keypair is used in exactly two places:
 
 1. **Public key extraction** (startup logging, vault link check, liquidation params) — safe, public key only
-2. **Transaction signing** (`transaction.sign(agentKeypair)` at index.ts:108) — local signing only
+2. **Transaction signing** (`transaction.sign(agentKeypair)` at index.ts:86) — local signing only
 
 ### Risk Assessment
 
@@ -129,7 +183,7 @@ The keypair holds ~0.01 SOL for gas. If the process memory is dumped, the attack
 - A disposable key with dust
 - Vault access that the authority revokes in one transaction
 
-**Verdict:** Key safety is correct. No key material leaks from the process.
+**Verdict:** Key safety is correct. No key material leaks from the process. Unchanged from v3.0.2.
 
 ---
 
@@ -137,11 +191,13 @@ The keypair holds ~0.01 SOL for gas. If the process memory is dumped, the attack
 
 ### Startup Verification
 
+Unchanged from v3.0.2:
+
 ```typescript
-const vault = await getVault(connection, config.vaultCreator)  // index.ts:164
+const vault = await getVault(connection, config.vaultCreator)  // index.ts:142
 if (!vault) throw new Error(...)
 
-const link = await getVaultForWallet(connection, agentKeypair.publicKey.toBase58())  // index.ts:171
+const link = await getVaultForWallet(connection, agentKeypair.publicKey.toBase58())  // index.ts:149
 if (!link) { /* print instructions, exit */ }
 ```
 
@@ -153,28 +209,17 @@ The bot verifies both vault existence and agent linkage before entering the scan
 const { transaction, message } = await buildLiquidateTransaction(connection, {
   mint: token.mint,
   liquidator: agentKeypair.publicKey.toBase58(),
-  borrower: holder.address,
-  vault: vaultCreator,  // index.ts:105
+  borrower: position.borrower,   // now from getAllLoanPositions result
+  vault: vaultCreator,            // index.ts:83
 })
 ```
 
-The `vault` parameter is correctly passed. Per the SDK audit, this causes:
+The `vault` parameter is correctly passed. The `borrower` field now comes from `LoanPositionWithKey.borrower` (returned by `getAllLoanPositions`) instead of `holder.address` (from `getHolders`). Both are base58 public key strings — the type is unchanged.
+
+Per the SDK audit, the `vault` param causes:
 - Vault PDA derived from `vaultCreator` (`["torch_vault", creator]`)
 - Wallet link PDA derived from `liquidator` (`["vault_wallet", wallet]`)
 - SOL debited from vault, collateral tokens credited to vault ATA
-
-### Scoping Fix (V3.0.0)
-
-In the previous version, `config.vaultCreator` was referenced inside `scanAndLiquidate` but `config` was local to `main()`. V3.0.0 correctly passes `vaultCreator` as a parameter:
-
-```typescript
-const scanAndLiquidate = async (
-  connection: Connection,
-  log: ReturnType<typeof createLogger>,
-  vaultCreator: string,
-  agentKeypair: Keypair,  // passed from main()
-) => { ... }
-```
 
 **Verdict:** Vault integration is correct. All value routes through the vault PDA.
 
@@ -184,8 +229,8 @@ const scanAndLiquidate = async (
 
 ### Error Isolation
 
+**Cycle level** — never crashes the loop (unchanged):
 ```typescript
-// Cycle level — never crashes the loop
 while (true) {
   try {
     await scanAndLiquidate(connection, log, config.vaultCreator, agentKeypair)
@@ -196,30 +241,21 @@ while (true) {
 }
 ```
 
-### Token-Level Isolation
-
+**Token level** — skip tokens where `getAllLoanPositions` fails:
 ```typescript
 for (const token of tokens) {
+  let positions: LoanPositionWithKey[]
   try {
-    lending = await getLendingInfo(connection, token.mint)
+    const result = await getAllLoanPositions(connection, token.mint)
+    positions = result.positions
   } catch {
-    continue  // skip tokens without lending
+    continue  // lending not enabled for this token
   }
+
+  if (positions.length === 0) continue
 ```
 
-### Holder-Level Isolation
-
-```typescript
-for (const holder of holders) {
-  try {
-    position = await getLoanPosition(connection, token.mint, holder.address)
-  } catch {
-    continue  // skip holders without loans
-  }
-```
-
-### Liquidation-Level Isolation
-
+**Liquidation level** — each liquidation attempt is individually caught:
 ```typescript
 try {
   const { transaction, message } = await buildLiquidateTransaction(...)
@@ -232,13 +268,23 @@ try {
 }
 ```
 
-Each failed liquidation is logged as a warning and the loop continues. No single failure can crash the bot.
+### Break Optimization
 
-**Verdict:** Error handling is robust. The bot degrades gracefully at every level.
+```typescript
+// index.ts:67-68
+for (const position of positions) {
+  if (position.health !== 'liquidatable') break
+```
+
+This is correct because `getAllLoanPositions` returns positions sorted by health: `liquidatable → at_risk → healthy`. Once the first non-liquidatable position is encountered, all remaining positions are also non-liquidatable. The E2E test (test_e2e.ts:159-174) independently validates this sort order.
+
+**Verdict:** Error handling is robust. The bot degrades gracefully at every level. The break optimization is correct and validated by tests.
 
 ---
 
 ## Configuration Validation
+
+Unchanged from v3.0.2.
 
 ### Required Variables
 
@@ -273,7 +319,7 @@ Each failed liquidation is logged as a warning and the loop continues. No single
 | Package | Version | Pinning | Post-Install | Risk |
 |---------|---------|---------|-------------|------|
 | `@solana/web3.js` | 1.98.4 | Exact | None | Low — standard Solana |
-| `torchsdk` | 3.2.3 | Exact | None | Low — audited separately |
+| `torchsdk` | 3.7.22 | Exact | None | Low — audited separately |
 
 ### Dev Dependencies
 
@@ -328,6 +374,13 @@ No credentials are sent. If either service is unreachable, the SDK degrades grac
 **Mitigation:** The on-chain program validates all liquidation preconditions. A fabricated RPC response would produce a transaction that fails on-chain.
 **Residual risk:** None — on-chain validation is the actual security boundary.
 
+### Threat: Fabricated getAllLoanPositions Results
+
+**Attack:** A compromised or malicious RPC returns positions with `health: 'liquidatable'` for loans that are actually healthy.
+**Impact:** Bot builds liquidation transactions that fail on-chain (program checks LTV).
+**Mitigation:** Same as above — on-chain program enforces liquidation threshold. The `health` field from `getAllLoanPositions` is a client-side convenience; the program independently verifies collateral value vs debt. A failed liquidation costs only the transaction fee (~0.000005 SOL).
+**Residual risk:** Wasted gas on failed transactions. No vault SOL lost on failed liquidations.
+
 ### Threat: RPC Rate Limiting / DDoS
 
 **Attack:** Overwhelming the bot with slow/failed RPC responses.
@@ -346,57 +399,60 @@ No credentials are sent. If either service is unreachable, the SDK degrades grac
 
 ## Findings
 
-### L-1: Agent Keypair Regenerated on Every Restart (RESOLVED in v3.0.2)
+### L-1: No Timeout on SDK Calls
 
 **Severity:** Low
-**File:** `index.ts:136-155`
-**Description:** Previously, the agent keypair was generated fresh on every startup, requiring re-linking after every restart. In v3.0.2, the bot optionally reads `SOLANA_PRIVATE_KEY` (base58 or JSON byte array) to persist the agent wallet across restarts. The default behavior (fresh `Keypair.generate()`) remains the safer option.
-**Status:** Resolved.
-
-### L-2: No Timeout on SDK Calls
-
-**Severity:** Low
-**File:** `index.ts:44-125`
-**Description:** SDK calls (`getTokens`, `getLendingInfo`, `getHolders`, `getLoanPosition`, `buildLiquidateTransaction`) have no explicit timeout. A hanging RPC endpoint could block the scan loop indefinitely.
+**File:** `index.ts:42-102`
+**Description:** SDK calls (`getTokens`, `getAllLoanPositions`, `buildLiquidateTransaction`) have no explicit timeout. A hanging RPC endpoint could block the scan loop indefinitely.
 **Impact:** Bot stalls until the RPC connection times out at the TCP level.
 **Recommendation:** Wrap SDK calls in a `Promise.race` with a timeout (e.g., 30 seconds per call).
+**Note:** The attack surface is reduced from v3.0.2 — the bot now makes 2 SDK calls per token (down from 2 + N), so fewer calls can hang.
 
-### I-1: Holder Discovery Limited to 20
-
-**Severity:** Informational
-**Description:** `getHolders` uses `getTokenLargestAccounts` which returns at most 20 holders. For tokens with many borrowers, some liquidatable positions may not be discovered.
-**Impact:** Missed liquidation opportunities for tokens with >20 holders.
-
-### I-2: No Deduplication Across Cycles
+### I-1: No Deduplication Across Cycles
 
 **Severity:** Informational
-**Description:** The bot checks all tokens and all holders on every cycle. If a liquidation fails (e.g., insufficient vault SOL), the same position will be retried on every cycle.
+**Description:** The bot checks all tokens and all positions on every cycle. If a liquidation fails (e.g., insufficient vault SOL), the same position will be retried on every cycle.
 **Impact:** Repeated log noise for positions that can't be liquidated. No security impact.
 
-### I-3: Log Level Filter Uses String Comparison
+### I-2: getAllLoanPositions Uses getProgramAccounts
 
 **Severity:** Informational
-**File:** `utils.ts:14-19`
-**Description:** The logger uses `indexOf` on the `LEVEL_ORDER` array for level filtering. This is correct but could be more performant with a numeric comparison. For a bot with 30-second cycle intervals, this is irrelevant.
-**Impact:** None.
+**Description:** `getAllLoanPositions` internally calls `getProgramAccounts` with discriminator + mint filters to find all LoanPosition accounts. Some RPC providers rate-limit or restrict `getProgramAccounts`. The bot falls back gracefully (the `catch` block skips the token), but tokens may be silently skipped if the RPC provider blocks this call.
+**Impact:** Missed liquidation opportunities on restrictive RPC providers. No security impact. The previous `getHolders` approach (`getTokenLargestAccounts`) had the same class of issue.
+**Recommendation:** Use an RPC provider that supports `getProgramAccounts` without restrictions (Helius, Triton, QuickNode, or a private validator).
 
-### I-4: Surfpool getTokenLargestAccounts Limitation
+---
 
-**Severity:** Informational
-**Description:** The E2E test for `getHolders` fails on Surfpool because `getTokenLargestAccounts` returns an internal error on the fork. This test passes on mainnet RPC.
-**Impact:** Test coverage limitation — does not affect production behavior.
+## Resolved Findings from v3.0.2
+
+### L-1 (v3.0.2): Agent Keypair Regenerated on Every Restart
+
+**Status:** Resolved in v3.0.2. Optional `SOLANA_PRIVATE_KEY` env var allows persisting the agent wallet. Still resolved in v4.0.0.
+
+### I-1 (v3.0.2): Holder Discovery Limited to 20
+
+**Status:** Resolved in v4.0.0. The bot no longer calls `getHolders` / `getTokenLargestAccounts`. `getAllLoanPositions` scans all LoanPosition PDAs directly via `getProgramAccounts` with no holder count ceiling.
+
+### I-3 (v3.0.2): Log Level Filter Uses String Comparison
+
+**Status:** Still present, still informational. For a bot with 30-second cycle intervals, this is irrelevant.
+
+### I-4 (v3.0.2): Surfpool getTokenLargestAccounts Limitation
+
+**Status:** Resolved in v4.0.0. The bot no longer calls `getHolders` / `getTokenLargestAccounts`. The E2E test no longer depends on this Surfpool-limited RPC method.
 
 ---
 
 ## Conclusion
 
-The Torch Liquidation Bot v3.0.2 is a well-structured, minimal-surface keeper with correct vault integration and robust error handling. Key findings:
+The Torch Liquidation Bot v4.0.0 is a cleaner, more efficient keeper with correct vault integration and robust error handling. Key findings:
 
-1. **Key safety is correct** — in-process `Keypair.generate()` by default, optional `SOLANA_PRIVATE_KEY` for persistence. No key logging, no key transmission.
-2. **Vault integration is correct** — `vault` param passed to `buildLiquidateTransaction`, SOL from vault, collateral to vault ATA.
-3. **Error handling is robust** — four levels of isolation (cycle, token, holder, liquidation). No single failure crashes the bot.
-4. **Dependency surface is minimal** — 2 runtime deps, both pinned exact, no post-install hooks.
-5. **No critical, high, or medium findings** — 1 low (L-1 resolved in v3.0.2), 1 low open, 4 informational issues identified.
+1. **Key safety is correct** — in-process `Keypair.generate()` by default, optional `SOLANA_PRIVATE_KEY` for persistence. No key logging, no key transmission. Unchanged from v3.0.2.
+2. **Vault integration is correct** — `vault` param passed to `buildLiquidateTransaction`, SOL from vault, collateral to vault ATA. Unchanged from v3.0.2.
+3. **Scan pattern improved** — `getAllLoanPositions` replaces the N+1 holder scan. One RPC call per token, no 20-holder ceiling, pre-sorted results with early break. Two v3.0.2 findings (I-1, I-4) are resolved by this change.
+4. **Error handling is robust** — three levels of isolation (cycle, token, liquidation). The removed holder level is no longer needed.
+5. **Dependency surface is minimal** — 2 runtime deps, both pinned exact, no post-install hooks. SDK upgraded from 3.2.3 to 3.7.22.
+6. **No critical, high, or medium findings** — 1 low (no timeout, carried from v3.0.2 as L-2, reduced surface), 2 informational.
 
 The bot is safe for production use as an autonomous liquidation keeper operating through a Torch Vault.
 
@@ -404,11 +460,11 @@ The bot is safe for production use as an autonomous liquidation keeper operating
 
 ## Audit Certification
 
-This audit was performed by Claude Opus 4.6 (Anthropic) on February 12, 2026. All source files were read in full and cross-referenced against the torchsdk v3.2.3 audit. The E2E test suite (7 passed, 1 informational) validates the bot against a Surfpool mainnet fork.
+This audit was performed by Claude Opus 4.6 (Anthropic) on February 27, 2026. All source files were read in full and cross-referenced against the torchsdk v3.7.22 audit. The E2E test suite (9 passed, 0 failed) validates the bot against a Surfpool mainnet fork, including sort order verification for `getAllLoanPositions`.
 
 **Auditor:** Claude Opus 4.6
-**Date:** 2026-02-12
-**Bot Version:** 3.0.2
-**Kit Version:** 1.0.0
-**SDK Version:** torchsdk 3.2.3
-**On-Chain Version:** V3.2.0 (Program ID: `8hbUkonssSEEtkqzwM7ZcZrD9evacM92TcWSooVF4BeT`)
+**Date:** 2026-02-27
+**Bot Version:** 4.0.0
+**Kit Version:** 2.0.0
+**SDK Version:** torchsdk 3.7.22
+**On-Chain Version:** V3.7.7 (Program ID: `8hbUkonssSEEtkqzwM7ZcZrD9evacM92TcWSooVF4BeT`, 27 instructions)

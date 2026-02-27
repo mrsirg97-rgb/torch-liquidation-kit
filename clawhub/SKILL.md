@@ -1,28 +1,45 @@
 ---
 name: torch-liquidation-bot
-version: "3.0.2"
-description: Autonomous vault-based liquidation keeper for Torch Market lending on Solana. Scans all migrated tokens for underwater loan positions (LTV > 65%), builds and executes liquidation transactions through a Torch Vault, and collects a 10% collateral bonus. The agent keypair is generated in-process -- disposable, holds nothing of value. All SOL and collateral tokens route through the vault. The human principal creates the vault, funds it, links the agent, and retains full control. Built on torchsdk v3.2.3 and the Torch Market protocol.
+version: "4.0.0"
+description: Autonomous vault-based liquidation keeper for Torch Market lending on Solana. Scans all migrated tokens for underwater loan positions (LTV > 65%) using the SDK's built-in bulk loan scanner (getAllLoanPositions), builds and executes liquidation transactions through a Torch Vault, and collects a 10% collateral bonus. The agent keypair is generated in-process -- disposable, holds nothing of value. All SOL and collateral tokens route through the vault. The human principal creates the vault, funds it, links the agent, and retains full control. Built on torchsdk v3.7.22 and the Torch Market protocol.
 license: MIT
 disable-model-invocation: true
 requires:
   env:
-    - SOLANA_RPC_URL
-    - VAULT_CREATOR
+    - name: SOLANA_RPC_URL
+      required: true
+    - name: VAULT_CREATOR
+      required: true
+    - name: SOLANA_PRIVATE_KEY
+      required: false
 metadata:
+  clawdbot:
+    requires:
+      env:
+        - name: SOLANA_RPC_URL
+          required: true
+        - name: VAULT_CREATOR
+          required: true
+        - name: SOLANA_PRIVATE_KEY
+      required: false
   openclaw:
     requires:
       env:
-        - SOLANA_RPC_URL
-        - VAULT_CREATOR
+        - name: SOLANA_RPC_URL
+          required: true
+        - name: VAULT_CREATOR
+          required: true
+        - name: SOLANA_PRIVATE_KEY
+          required: false
     primaryEnv: SOLANA_RPC_URL
     install:
       - id: npm-torch-liquidation-bot
         kind: npm
-        package: torch-liquidation-bot@^3.0.2
+        package: torch-liquidation-bot@^4.0.0
         flags: []
         label: "Install Torch Liquidation Bot (npm, optional -- SDK is bundled in lib/torchsdk/ and bot source is bundled under lib/kit on clawhub)"
   author: torch-market
-  version: "3.0.2"
+  version: "4.0.0
   clawhub: https://clawhub.ai/mrsirg97-rgb/torch-liquidation-bot
   kit-source: https://github.com/mrsirg97-rgb/torch-liquidation-kit
   website: https://torch.market
@@ -71,7 +88,7 @@ Every migrated token on Torch has a built-in lending market. Holders lock tokens
 
 That's where this bot comes in.
 
-It scans every migrated token's lending market, checks every borrower's loan position, and when it finds one that's underwater -- it liquidates it through your vault. The collateral tokens go to your vault ATA. The SOL cost comes from your vault. The agent wallet that signs the transaction holds nothing.
+It scans every migrated token's lending market using the SDK's bulk loan scanner (`getAllLoanPositions`) -- one RPC call per token returns all active positions pre-sorted by health. When it finds one that's underwater, it liquidates it through your vault. The collateral tokens go to your vault ATA. The SOL cost comes from your vault. The agent wallet that signs the transaction holds nothing.
 
 **This is not a read-only scanner.** This is a fully operational keeper that generates its own keypair, verifies vault linkage, and executes liquidation transactions autonomously in a continuous loop.
 
@@ -80,23 +97,24 @@ It scans every migrated token's lending market, checks every borrower's loan pos
 ## How It Works
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│                  LIQUIDATION LOOP                         │
-│                                                          │
-│  1. Discover migrated tokens (getTokens)                 │
-│  2. For each token, check lending state (getLendingInfo)  │
-│  3. Skip tokens with no active loans                     │
-│  4. Get token holders (getHolders)                       │
-│  5. For each holder, check loan position (getLoanPosition)│
-│  6. If health === 'liquidatable':                        │
-│     → buildLiquidateTransaction(vault=creator)           │
-│     → sign with agent keypair                            │
-│     → submit and confirm                                 │
-│  7. Sleep SCAN_INTERVAL_MS, repeat                       │
-│                                                          │
-│  All SOL comes from vault. All collateral goes to vault. │
-│  Agent wallet holds nothing. Vault is the boundary.      │
-└─────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────┐
+│                  LIQUIDATION LOOP                          │
+│                                                           │
+│  1. Discover migrated tokens (getTokens)                  │
+│  2. For each token, scan all loans (getAllLoanPositions)   │
+│     — single RPC call, returns positions sorted by health │
+│     — liquidatable → at_risk → healthy                    │
+│  3. Skip tokens with no active loans                      │
+│  4. For each liquidatable position:                       │
+│     → buildLiquidateTransaction(vault=creator)            │
+│     → sign with agent keypair                             │
+│     → submit and confirm                                  │
+│     → break when health != 'liquidatable' (pre-sorted)    │
+│  5. Sleep SCAN_INTERVAL_MS, repeat                        │
+│                                                           │
+│  All SOL comes from vault. All collateral goes to vault.  │
+│  Agent wallet holds nothing. Vault is the boundary.       │
+└──────────────────────────────────────────────────────────┘
 ```
 
 ### The Agent Keypair
@@ -145,7 +163,7 @@ If the agent keypair is compromised, the attacker gets dust and vault access tha
 ### 1. Install
 
 ```bash
-npm install torch-liquidation-bot@3.0.2
+npm install torch-liquidation-bot@4.0.0
 ```
 
 Or use the bundled source from ClawHub — the Torch SDK is included in `lib/torchsdk/` and the bot source is in `lib/kit/`.
@@ -208,14 +226,14 @@ packages/bot/src/
 └── utils.ts    — sol(), bpsToPercent(), createLogger()
 ```
 
-The bot is ~190 lines of TypeScript. It does one thing: find underwater loans and liquidate them through the vault.
+The bot is ~188 lines of TypeScript. It does one thing: find underwater loans and liquidate them through the vault.
 
 ### Dependencies
 
 | Package | Version | Purpose |
 |---------|---------|---------|
 | `@solana/web3.js` | 1.98.4 | Solana RPC, keypair, transaction |
-| `torchsdk` | 3.2.3 | Token queries, lending state, liquidation builder, vault queries |
+| `torchsdk` | 3.7.22 | Token queries, bulk loan scanning, liquidation builder, vault queries |
 
 Two runtime dependencies. Both pinned to exact versions. No `^` or `~` ranges.
 
@@ -255,10 +273,10 @@ The bot is profitable by design — every successful liquidation returns more va
 | Liquidation Threshold | 65% |
 | Interest Rate | 2% per epoch (~weekly) |
 | Liquidation Bonus | 10% |
-| Utilization Cap | 50% of treasury |
+| Utilization Cap | 70% of treasury |
 | Min Borrow | 0.1 SOL |
 
-Collateral value is calculated from Raydium pool reserves. The 1% Token-2022 transfer fee applies on collateral deposits and withdrawals (~2% round-trip).
+Collateral value is calculated from Raydium pool reserves. The 0.03% Token-2022 transfer fee (3 bps, immutable per mint) applies on collateral deposits and withdrawals.
 
 ### When Liquidations Happen
 
@@ -278,23 +296,38 @@ The bot uses a focused subset of the Torch SDK:
 | Function | Purpose |
 |----------|---------|
 | `getTokens(connection, { status: 'migrated' })` | Discover all tokens with active lending markets |
-| `getLendingInfo(connection, mint)` | Check if a token has active loans |
-| `getHolders(connection, mint)` | Get token holders (potential borrowers) |
-| `getLoanPosition(connection, mint, wallet)` | Check a holder's loan health |
+| `getAllLoanPositions(connection, mint)` | Bulk scan all active loans for a token — returns positions pre-sorted by health (liquidatable first), fetches pool price once |
 | `getVault(connection, creator)` | Verify vault exists on startup |
 | `getVaultForWallet(connection, wallet)` | Verify agent is linked to vault |
 | `buildLiquidateTransaction(connection, params)` | Build the liquidation transaction (vault-routed) |
 | `confirmTransaction(connection, sig, wallet)` | Confirm transaction on-chain via RPC (verifies signer, checks Torch instructions) |
 
-### buildLiquidateTransaction Parameters
+### Scan and Liquidate Pattern
 
 ```typescript
-const { transaction, message } = await buildLiquidateTransaction(connection, {
-  mint: token.mint,           // token with the underwater loan
-  liquidator: agentPubkey,    // agent wallet (signer)
-  borrower: holderAddress,    // borrower being liquidated
-  vault: vaultCreator,        // vault creator pubkey (SOL from vault, tokens to vault)
-});
+import { getTokens, getAllLoanPositions, buildLiquidateTransaction } from 'torchsdk'
+
+// 1. Discover migrated tokens
+const { tokens } = await getTokens(connection, { status: 'migrated', sort: 'volume', limit: 50 })
+
+for (const token of tokens) {
+  // 2. Bulk scan — one RPC call per token, positions sorted liquidatable-first
+  const { positions } = await getAllLoanPositions(connection, token.mint)
+
+  for (const pos of positions) {
+    if (pos.health !== 'liquidatable') break  // pre-sorted, done
+
+    // 3. Build and execute through vault
+    const { transaction, message } = await buildLiquidateTransaction(connection, {
+      mint: token.mint,           // token with the underwater loan
+      liquidator: agentPubkey,    // agent wallet (signer)
+      borrower: pos.borrower,     // borrower being liquidated
+      vault: vaultCreator,        // vault creator pubkey (SOL from vault, tokens to vault)
+    })
+    transaction.sign(agentKeypair)
+    await connection.sendRawTransaction(transaction.serialize())
+  }
+}
 ```
 
 ---
@@ -310,7 +343,7 @@ scan interval: 30000ms
 [09:15:32] INFO  vault found — authority=8cpW...
 [09:15:32] INFO  agent wallet linked to vault — starting scan loop
 [09:15:32] INFO  treasury: 5.0000 SOL
-[09:15:33] INFO  LIQUIDATABLE | SDKTEST | borrower=3AyZ... | LTV=72.50% > threshold=65.00% | owed=0.5000 SOL
+[09:15:33] INFO  LIQUIDATABLE | SDKTEST | borrower=3AyZ... | LTV=72.50% | owed=0.5000 SOL
 [09:15:34] INFO  LIQUIDATED | SDKTEST | borrower=3AyZ... | sig=4vK9... | collateral received at 10% discount
 ```
 
@@ -366,14 +399,14 @@ surfpool start --network mainnet --no-tui
 pnpm test
 ```
 
-**Test result:** 7 passed, 1 informational (Surfpool RPC limitation on `getTokenLargestAccounts` — works on mainnet).
+**Test result:** 9 passed, 0 failed (Surfpool mainnet fork).
 
 | Test | What It Validates |
 |------|-------------------|
 | Connection | RPC reachable |
 | getTokens | Discovers migrated tokens |
 | getLendingInfo | Reads lending state for all tokens |
-| getHolders + getLoanPosition | Checks holder positions |
+| getAllLoanPositions | Bulk scans active loans, verifies sort order (liquidatable first) |
 | getToken | Token metadata, price, status |
 | getVaultForWallet | Vault link returns null for unlinked wallet |
 | In-process keypair | No external key required |

@@ -2,7 +2,7 @@
     "address": "8hbUkonssSEEtkqzwM7ZcZrD9evacM92TcWSooVF4BeT",
     "metadata": {
         "name": "torch_market",
-        "version": "3.2.0",
+        "version": "3.7.7",
         "spec": "0.1.0",
         "description": "torch.market"
     },
@@ -272,19 +272,19 @@
                 {
                     "name": "pool_state",
                     "docs": [
-                        "Raydium pool state for price calculation"
+                        "[V27] Raydium pool state — constrained via PDA derivation"
                     ]
                 },
                 {
                     "name": "token_vault_0",
                     "docs": [
-                        "Pool token vault 0 (for reading reserves)"
+                        "[V27] Pool token vault 0 — constrained via PDA derivation"
                     ]
                 },
                 {
                     "name": "token_vault_1",
                     "docs": [
-                        "Pool token vault 1 (for reading reserves)"
+                        "[V27] Pool token vault 1 — constrained via PDA derivation"
                     ]
                 },
                 {
@@ -923,159 +923,6 @@
             ]
         },
         {
-            "name": "buyback",
-            "docs": [
-                "[V2] Execute a buyback using treasury SOL (pre-migration, on bonding curve)."
-            ],
-            "discriminator": [
-                106,
-                117,
-                64,
-                30,
-                56,
-                69,
-                7,
-                45
-            ],
-            "accounts": [
-                {
-                    "name": "payer",
-                    "docs": [
-                        "Anyone can trigger a buyback (permissionless)"
-                    ],
-                    "writable": true,
-                    "signer": true
-                },
-                {
-                    "name": "mint",
-                    "writable": true
-                },
-                {
-                    "name": "bonding_curve",
-                    "writable": true,
-                    "pda": {
-                        "seeds": [
-                            {
-                                "kind": "const",
-                                "value": [
-                                    98,
-                                    111,
-                                    110,
-                                    100,
-                                    105,
-                                    110,
-                                    103,
-                                    95,
-                                    99,
-                                    117,
-                                    114,
-                                    118,
-                                    101
-                                ]
-                            },
-                            {
-                                "kind": "account",
-                                "path": "mint"
-                            }
-                        ]
-                    }
-                },
-                {
-                    "name": "token_vault",
-                    "writable": true,
-                    "pda": {
-                        "seeds": [
-                            {
-                                "kind": "account",
-                                "path": "bonding_curve"
-                            },
-                            {
-                                "kind": "account",
-                                "path": "token_program"
-                            },
-                            {
-                                "kind": "account",
-                                "path": "mint"
-                            }
-                        ],
-                        "program": {
-                            "kind": "const",
-                            "value": [
-                                140,
-                                151,
-                                37,
-                                143,
-                                78,
-                                36,
-                                137,
-                                241,
-                                187,
-                                61,
-                                16,
-                                41,
-                                20,
-                                142,
-                                13,
-                                131,
-                                11,
-                                90,
-                                19,
-                                153,
-                                218,
-                                255,
-                                16,
-                                132,
-                                4,
-                                142,
-                                123,
-                                216,
-                                219,
-                                233,
-                                248,
-                                89
-                            ]
-                        }
-                    }
-                },
-                {
-                    "name": "token_treasury",
-                    "docs": [
-                        "Per-token treasury with SOL for buybacks"
-                    ],
-                    "writable": true,
-                    "pda": {
-                        "seeds": [
-                            {
-                                "kind": "const",
-                                "value": [
-                                    116,
-                                    114,
-                                    101,
-                                    97,
-                                    115,
-                                    117,
-                                    114,
-                                    121
-                                ]
-                            },
-                            {
-                                "kind": "account",
-                                "path": "mint"
-                            }
-                        ]
-                    }
-                },
-                {
-                    "name": "token_program"
-                },
-                {
-                    "name": "system_program",
-                    "address": "11111111111111111111111111111111"
-                }
-            ],
-            "args": []
-        },
-        {
             "name": "claim_protocol_rewards",
             "docs": [
                 "[V11] Claim protocol rewards.",
@@ -1396,6 +1243,51 @@
                     "writable": true
                 },
                 {
+                    "name": "treasury_lock",
+                    "docs": [
+                        "[V27] Treasury lock PDA — owns the locked token ATA (250M).",
+                        "Initialized at token creation. Also serves as type discriminator",
+                        "for V27 vs legacy tokens in revival handler."
+                    ],
+                    "writable": true,
+                    "pda": {
+                        "seeds": [
+                            {
+                                "kind": "const",
+                                "value": [
+                                    116,
+                                    114,
+                                    101,
+                                    97,
+                                    115,
+                                    117,
+                                    114,
+                                    121,
+                                    95,
+                                    108,
+                                    111,
+                                    99,
+                                    107
+                                ]
+                            },
+                            {
+                                "kind": "account",
+                                "path": "mint"
+                            }
+                        ]
+                    }
+                },
+                {
+                    "name": "treasury_lock_token_account",
+                    "docs": [
+                        "Created via CPI to associated token program (same pattern as token_vault",
+                        "and treasury_token_account above). Address validated by CPI: the associated",
+                        "token program derives the correct ATA from (treasury_lock PDA, mint, Token-2022)",
+                        "and rejects mismatched addresses. mint_to CPI further validates mint authority."
+                    ],
+                    "writable": true
+                },
+                {
                     "name": "token_2022_program"
                 },
                 {
@@ -1575,43 +1467,42 @@
             ]
         },
         {
-            "name": "execute_auto_buyback",
+            "name": "fund_migration_wsol",
             "docs": [
-                "[V9] Execute automatic treasury buyback on Raydium DEX.",
-                "Monitors pool ratio and triggers buyback when price drops below threshold.",
-                "Permissionless - anyone can call (keeper/crank)."
+                "[V26] Fund bonding curve's WSOL ATA with bonding curve SOL.",
+                "Must be called BEFORE migrate_to_dex in the same transaction.",
+                "Isolates direct lamport manipulation from CPIs to avoid runtime balance errors."
             ],
             "discriminator": [
-                191,
+                143,
+                163,
                 2,
-                228,
-                246,
-                241,
-                139,
-                119,
-                21
+                0,
+                85,
+                235,
+                44,
+                150
             ],
             "accounts": [
                 {
                     "name": "payer",
                     "docs": [
-                        "Anyone can trigger buyback (permissionless)"
+                        "Anyone can trigger (permissionless)"
                     ],
-                    "writable": true,
                     "signer": true
                 },
                 {
                     "name": "mint",
                     "docs": [
-                        "Token mint (mutable for burning)"
-                    ],
-                    "writable": true
+                        "Token mint being migrated"
+                    ]
                 },
                 {
                     "name": "bonding_curve",
                     "docs": [
-                        "Bonding curve (must be migrated)"
+                        "Bonding curve — SOL source"
                     ],
+                    "writable": true,
                     "pda": {
                         "seeds": [
                             {
@@ -1640,165 +1531,14 @@
                     }
                 },
                 {
-                    "name": "treasury",
+                    "name": "bc_wsol",
                     "docs": [
-                        "Token treasury (has SOL for buybacks)"
-                    ],
-                    "writable": true,
-                    "pda": {
-                        "seeds": [
-                            {
-                                "kind": "const",
-                                "value": [
-                                    116,
-                                    114,
-                                    101,
-                                    97,
-                                    115,
-                                    117,
-                                    114,
-                                    121
-                                ]
-                            },
-                            {
-                                "kind": "account",
-                                "path": "mint"
-                            }
-                        ]
-                    }
-                },
-                {
-                    "name": "treasury_wsol",
-                    "docs": [
-                        "Treasury's WSOL account for swapping"
+                        "Bonding curve's WSOL ATA (lamport destination — protocol controlled)"
                     ],
                     "writable": true
-                },
-                {
-                    "name": "treasury_token",
-                    "docs": [
-                        "Treasury's token account for receiving bought tokens"
-                    ],
-                    "writable": true,
-                    "pda": {
-                        "seeds": [
-                            {
-                                "kind": "account",
-                                "path": "treasury"
-                            },
-                            {
-                                "kind": "account",
-                                "path": "token_2022_program"
-                            },
-                            {
-                                "kind": "account",
-                                "path": "mint"
-                            }
-                        ],
-                        "program": {
-                            "kind": "const",
-                            "value": [
-                                140,
-                                151,
-                                37,
-                                143,
-                                78,
-                                36,
-                                137,
-                                241,
-                                187,
-                                61,
-                                16,
-                                41,
-                                20,
-                                142,
-                                13,
-                                131,
-                                11,
-                                90,
-                                19,
-                                153,
-                                218,
-                                255,
-                                16,
-                                132,
-                                4,
-                                142,
-                                123,
-                                216,
-                                219,
-                                233,
-                                248,
-                                89
-                            ]
-                        }
-                    }
-                },
-                {
-                    "name": "raydium_program",
-                    "address": "CPMMoo8L3F4NbTegBCKVNunggL7H1ZpdTHKxQB5qKP1C"
-                },
-                {
-                    "name": "raydium_authority"
-                },
-                {
-                    "name": "amm_config",
-                    "docs": [
-                        "Raydium AMM config"
-                    ]
-                },
-                {
-                    "name": "pool_state",
-                    "docs": [
-                        "Raydium pool state"
-                    ],
-                    "writable": true
-                },
-                {
-                    "name": "input_vault",
-                    "docs": [
-                        "Pool's input vault (WSOL vault)"
-                    ],
-                    "writable": true
-                },
-                {
-                    "name": "output_vault",
-                    "docs": [
-                        "Pool's output vault (token vault)"
-                    ],
-                    "writable": true
-                },
-                {
-                    "name": "wsol_mint",
-                    "docs": [
-                        "WSOL mint"
-                    ],
-                    "address": "So11111111111111111111111111111111111111112"
-                },
-                {
-                    "name": "observation_state",
-                    "docs": [
-                        "Raydium observation state"
-                    ],
-                    "writable": true
-                },
-                {
-                    "name": "token_program"
-                },
-                {
-                    "name": "token_2022_program"
-                },
-                {
-                    "name": "system_program",
-                    "address": "11111111111111111111111111111111"
                 }
             ],
-            "args": [
-                {
-                    "name": "minimum_amount_out",
-                    "type": "u64"
-                }
-            ]
+            "args": []
         },
         {
             "name": "fund_vault_wsol",
@@ -1990,10 +1730,70 @@
                 },
                 {
                     "name": "treasury_token_account",
-                    "writable": true
+                    "docs": [
+                        "Treasury's Token-2022 ATA — must match treasury PDA's ATA for this mint"
+                    ],
+                    "writable": true,
+                    "pda": {
+                        "seeds": [
+                            {
+                                "kind": "account",
+                                "path": "token_treasury"
+                            },
+                            {
+                                "kind": "account",
+                                "path": "token_2022_program"
+                            },
+                            {
+                                "kind": "account",
+                                "path": "mint"
+                            }
+                        ],
+                        "program": {
+                            "kind": "const",
+                            "value": [
+                                140,
+                                151,
+                                37,
+                                143,
+                                78,
+                                36,
+                                137,
+                                241,
+                                187,
+                                61,
+                                16,
+                                41,
+                                20,
+                                142,
+                                13,
+                                131,
+                                11,
+                                90,
+                                19,
+                                153,
+                                218,
+                                255,
+                                16,
+                                132,
+                                4,
+                                142,
+                                123,
+                                216,
+                                219,
+                                233,
+                                248,
+                                89
+                            ]
+                        }
+                    }
                 },
                 {
                     "name": "token_2022_program"
+                },
+                {
+                    "name": "associated_token_program",
+                    "address": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
                 }
             ],
             "args": []
@@ -2454,19 +2254,19 @@
                 {
                     "name": "pool_state",
                     "docs": [
-                        "Raydium pool state for price calculation"
+                        "[V27] Raydium pool state — constrained via PDA derivation"
                     ]
                 },
                 {
                     "name": "token_vault_0",
                     "docs": [
-                        "Pool token vault 0"
+                        "[V27] Pool token vault 0 — constrained via PDA derivation"
                     ]
                 },
                 {
                     "name": "token_vault_1",
                     "docs": [
-                        "Pool token vault 1"
+                        "[V27] Pool token vault 1 — constrained via PDA derivation"
                     ]
                 },
                 {
@@ -2587,7 +2387,9 @@
         {
             "name": "migrate_to_dex",
             "docs": [
-                "[V5] Migrate bonded token to Raydium CPMM DEX.",
+                "[V26] Migrate bonded token to Raydium CPMM DEX.",
+                "Permissionless — anyone can call once bonding completes.",
+                "bc_wsol must be pre-funded via fund_migration_wsol.",
                 "Creates a Raydium pool with locked liquidity (LP tokens burned)."
             ],
             "discriminator": [
@@ -2680,7 +2482,7 @@
                 {
                     "name": "treasury",
                     "docs": [
-                        "Token treasury (pays 0.15 SOL migration fee from its balance)"
+                        "Token treasury (reimburses payer for Raydium migration costs)"
                     ],
                     "writable": true,
                     "pda": {
@@ -2826,9 +2628,56 @@
                     }
                 },
                 {
+                    "name": "treasury_lock_token_account",
+                    "docs": [
+                        "[V31] Treasury lock's token account — receives vote-return tokens."
+                    ],
+                    "writable": true
+                },
+                {
+                    "name": "treasury_lock",
+                    "docs": [
+                        "[V31] Treasury lock PDA — authority over locked tokens"
+                    ],
+                    "pda": {
+                        "seeds": [
+                            {
+                                "kind": "const",
+                                "value": [
+                                    116,
+                                    114,
+                                    101,
+                                    97,
+                                    115,
+                                    117,
+                                    114,
+                                    121,
+                                    95,
+                                    108,
+                                    111,
+                                    99,
+                                    107
+                                ]
+                            },
+                            {
+                                "kind": "account",
+                                "path": "mint"
+                            }
+                        ]
+                    }
+                },
+                {
+                    "name": "bc_wsol",
+                    "docs": [
+                        "[V26] Bonding curve's WSOL ATA — pre-funded by fund_migration_wsol.",
+                        "Closed to payer_wsol at start of migration (CPI, no direct lamport manipulation)."
+                    ],
+                    "writable": true
+                },
+                {
                     "name": "payer_wsol",
                     "docs": [
-                        "Payer's WSOL account (created for migration, funded with bonding curve SOL)"
+                        "Payer's WSOL account — receives SOL from bc_wsol close, used by Raydium."
                     ],
                     "writable": true
                 },
@@ -2846,8 +2695,9 @@
                 {
                     "name": "amm_config",
                     "docs": [
-                        "Raydium AMM config"
-                    ]
+                        "Raydium AMM config — constrained to prevent pool creation with wrong fee tier"
+                    ],
+                    "address": "D4FPEruKEHrG5TenZ2mpDGEfu1iUvTiqBxvpU8HLBvC2"
                 },
                 {
                     "name": "raydium_authority",
@@ -2907,7 +2757,7 @@
                 {
                     "name": "create_pool_fee",
                     "docs": [
-                        "Raydium fee receiver (receives 0.15 SOL)"
+                        "Raydium fee receiver (pool creation fee)"
                     ],
                     "writable": true
                 },
@@ -3938,6 +3788,235 @@
             "args": []
         },
         {
+            "name": "swap_fees_to_sol",
+            "docs": [
+                "[V20] Swap harvested transfer fee tokens to SOL via Raydium.",
+                "Sells treasury's Token-2022 tokens for SOL. Permissionless."
+            ],
+            "discriminator": [
+                138,
+                113,
+                240,
+                196,
+                158,
+                157,
+                10,
+                150
+            ],
+            "accounts": [
+                {
+                    "name": "payer",
+                    "docs": [
+                        "Anyone can trigger (permissionless)"
+                    ],
+                    "writable": true,
+                    "signer": true
+                },
+                {
+                    "name": "mint",
+                    "docs": [
+                        "Token mint (Token-2022)"
+                    ],
+                    "writable": true
+                },
+                {
+                    "name": "bonding_curve",
+                    "docs": [
+                        "Bonding curve (must be migrated + Token-2022)"
+                    ],
+                    "pda": {
+                        "seeds": [
+                            {
+                                "kind": "const",
+                                "value": [
+                                    98,
+                                    111,
+                                    110,
+                                    100,
+                                    105,
+                                    110,
+                                    103,
+                                    95,
+                                    99,
+                                    117,
+                                    114,
+                                    118,
+                                    101
+                                ]
+                            },
+                            {
+                                "kind": "account",
+                                "path": "mint"
+                            }
+                        ]
+                    }
+                },
+                {
+                    "name": "treasury",
+                    "docs": [
+                        "Token treasury (sells tokens, receives SOL)"
+                    ],
+                    "writable": true,
+                    "pda": {
+                        "seeds": [
+                            {
+                                "kind": "const",
+                                "value": [
+                                    116,
+                                    114,
+                                    101,
+                                    97,
+                                    115,
+                                    117,
+                                    114,
+                                    121
+                                ]
+                            },
+                            {
+                                "kind": "account",
+                                "path": "mint"
+                            }
+                        ]
+                    }
+                },
+                {
+                    "name": "treasury_token_account",
+                    "docs": [
+                        "Treasury's Token-2022 ATA (source of harvested tokens)"
+                    ],
+                    "writable": true,
+                    "pda": {
+                        "seeds": [
+                            {
+                                "kind": "account",
+                                "path": "treasury"
+                            },
+                            {
+                                "kind": "account",
+                                "path": "token_2022_program"
+                            },
+                            {
+                                "kind": "account",
+                                "path": "mint"
+                            }
+                        ],
+                        "program": {
+                            "kind": "const",
+                            "value": [
+                                140,
+                                151,
+                                37,
+                                143,
+                                78,
+                                36,
+                                137,
+                                241,
+                                187,
+                                61,
+                                16,
+                                41,
+                                20,
+                                142,
+                                13,
+                                131,
+                                11,
+                                90,
+                                19,
+                                153,
+                                218,
+                                255,
+                                16,
+                                132,
+                                4,
+                                142,
+                                123,
+                                216,
+                                219,
+                                233,
+                                248,
+                                89
+                            ]
+                        }
+                    }
+                },
+                {
+                    "name": "treasury_wsol",
+                    "docs": [
+                        "Treasury's WSOL ATA (receives swap proceeds, then closed)"
+                    ],
+                    "writable": true
+                },
+                {
+                    "name": "raydium_program",
+                    "address": "CPMMoo8L3F4NbTegBCKVNunggL7H1ZpdTHKxQB5qKP1C"
+                },
+                {
+                    "name": "raydium_authority"
+                },
+                {
+                    "name": "amm_config",
+                    "docs": [
+                        "Raydium AMM config — constrained to prevent pool substitution attacks"
+                    ],
+                    "address": "D4FPEruKEHrG5TenZ2mpDGEfu1iUvTiqBxvpU8HLBvC2"
+                },
+                {
+                    "name": "pool_state",
+                    "docs": [
+                        "Raydium pool state — constrained via PDA derivation"
+                    ],
+                    "writable": true
+                },
+                {
+                    "name": "token_vault",
+                    "docs": [
+                        "Pool's token vault — constrained via PDA derivation"
+                    ],
+                    "writable": true
+                },
+                {
+                    "name": "wsol_vault",
+                    "docs": [
+                        "Pool's WSOL vault — constrained via PDA derivation"
+                    ],
+                    "writable": true
+                },
+                {
+                    "name": "wsol_mint",
+                    "docs": [
+                        "WSOL mint"
+                    ],
+                    "address": "So11111111111111111111111111111111111111112"
+                },
+                {
+                    "name": "observation_state",
+                    "docs": [
+                        "Raydium observation state — constrained via PDA derivation"
+                    ],
+                    "writable": true
+                },
+                {
+                    "name": "token_program",
+                    "docs": [
+                        "SPL Token program (for WSOL operations)"
+                    ]
+                },
+                {
+                    "name": "token_2022_program"
+                },
+                {
+                    "name": "system_program",
+                    "address": "11111111111111111111111111111111"
+                }
+            ],
+            "args": [
+                {
+                    "name": "minimum_amount_out",
+                    "type": "u64"
+                }
+            ]
+        },
+        {
             "name": "transfer_authority",
             "docs": [
                 "[V14.1] Transfer vault authority to a new wallet.",
@@ -4351,34 +4430,35 @@
                 {
                     "name": "amm_config",
                     "docs": [
-                        "Raydium AMM config"
-                    ]
+                        "Raydium AMM config — constrained to prevent pool substitution attacks"
+                    ],
+                    "address": "D4FPEruKEHrG5TenZ2mpDGEfu1iUvTiqBxvpU8HLBvC2"
                 },
                 {
                     "name": "pool_state",
                     "docs": [
-                        "Raydium pool state"
+                        "[V27] Raydium pool state — constrained via PDA derivation"
                     ],
                     "writable": true
                 },
                 {
                     "name": "pool_token_vault_0",
                     "docs": [
-                        "Pool token vault 0"
+                        "[V27] Pool token vault 0 — constrained via PDA derivation"
                     ],
                     "writable": true
                 },
                 {
                     "name": "pool_token_vault_1",
                     "docs": [
-                        "Pool token vault 1"
+                        "[V27] Pool token vault 1 — constrained via PDA derivation"
                     ],
                     "writable": true
                 },
                 {
                     "name": "observation_state",
                     "docs": [
-                        "Raydium observation state"
+                        "[V27] Raydium observation state — constrained via PDA derivation"
                     ],
                     "writable": true
                 },
@@ -4722,6 +4802,19 @@
             ]
         },
         {
+            "name": "TreasuryLock",
+            "discriminator": [
+                175,
+                131,
+                81,
+                135,
+                154,
+                50,
+                12,
+                139
+            ]
+        },
+        {
             "name": "UserPosition",
             "discriminator": [
                 251,
@@ -5045,7 +5138,7 @@
         {
             "code": 6040,
             "name": "InsufficientVolumeForRewards",
-            "msg": "Insufficient volume for protocol rewards (need >= 10 SOL/epoch)"
+            "msg": "Insufficient volume for protocol rewards (need >= 2 SOL/epoch)"
         },
         {
             "code": 6041,
@@ -5136,6 +5229,21 @@
             "code": 6058,
             "name": "InvalidWsolAccount",
             "msg": "Invalid WSOL account - must be vault's WSOL ATA"
+        },
+        {
+            "code": 6059,
+            "name": "InvalidBondingTarget",
+            "msg": "Invalid bonding target: must be 50, 100, or 200 SOL"
+        },
+        {
+            "code": 6060,
+            "name": "InvalidTokenAccount",
+            "msg": "Invalid token account - must be treasury lock's Token-2022 ATA"
+        },
+        {
+            "code": 6061,
+            "name": "ClaimBelowMinimum",
+            "msg": "Claim amount below minimum (0.1 SOL)"
         }
     ],
     "types": [
@@ -5330,6 +5438,14 @@
                             "Treasury bump [V2]"
                         ],
                         "type": "u8"
+                    },
+                    {
+                        "name": "bonding_target",
+                        "docs": [
+                            "Per-token graduation target in lamports [V23]",
+                            "0 = default (200 SOL) for backwards compat with existing tokens"
+                        ],
+                        "type": "u64"
                     }
                 ]
             }
@@ -5398,6 +5514,10 @@
                     {
                         "name": "uri",
                         "type": "string"
+                    },
+                    {
+                        "name": "sol_target",
+                        "type": "u64"
                     }
                 ]
             }
@@ -6152,6 +6272,41 @@
                             "Max percentage of treasury SOL that can be lent (default: 5000 = 50%)"
                         ],
                         "type": "u16"
+                    }
+                ]
+            }
+        },
+        {
+            "name": "TreasuryLock",
+            "docs": [
+                "[V27] Treasury lock for new tokens. Owns the locked token ATA (250M).",
+                "",
+                "Every new token gets a TreasuryLock PDA that holds 25% of supply in a",
+                "community-governed reserve. The lock PDA owns a Token-2022 ATA containing",
+                "the locked tokens. No instruction can withdraw — release logic is deferred",
+                "to a future governance mechanism.",
+                "",
+                "Also serves as a type discriminator: its existence tells the revival handler",
+                "to use V27 thresholds (IVS = 3BT/8) instead of legacy V25 thresholds (IVS = BT/8).",
+                "",
+                "Seeds: [\"treasury_lock\", mint.key()]"
+            ],
+            "type": {
+                "kind": "struct",
+                "fields": [
+                    {
+                        "name": "mint",
+                        "docs": [
+                            "Token mint this lock belongs to"
+                        ],
+                        "type": "pubkey"
+                    },
+                    {
+                        "name": "bump",
+                        "docs": [
+                            "PDA bump"
+                        ],
+                        "type": "u8"
                     }
                 ]
             }

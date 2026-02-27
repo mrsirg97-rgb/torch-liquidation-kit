@@ -1,7 +1,7 @@
 {
   "name": "Torch Liquidation Bot",
-  "description": "Autonomous vault-based liquidation keeper for Torch Market lending on Solana. Scans all migrated tokens for underwater loan positions (LTV > 65%), builds and executes liquidation transactions through a Torch Vault, and collects a 10% collateral bonus. The agent keypair is generated in-process -- disposable, holds nothing of value. All SOL and collateral tokens route through the vault. The human principal creates the vault, funds it, links the agent, and retains full control. Built on torchsdk v3.2.3 and the Torch Market protocol.",
-  "version": "3.0.2",
+  "description": "Autonomous vault-based liquidation keeper for Torch Market lending on Solana. Scans all migrated tokens for underwater loan positions (LTV > 65%) using the SDK's built-in bulk loan scanner (getAllLoanPositions), builds and executes liquidation transactions through a Torch Vault, and collects a 10% collateral bonus. The agent keypair is generated in-process -- disposable, holds nothing of value. All SOL and collateral tokens route through the vault. The human principal creates the vault, funds it, links the agent, and retains full control. Built on torchsdk v3.7.22 and the Torch Market protocol.",
+  "version": "4.0.0",
   "type": "protocol",
   "disable-model-invocation": true,
   "website": "https://torch.market",
@@ -39,7 +39,7 @@
       {
         "id": "npm-torch-liquidation-bot",
         "kind": "npm",
-        "package": "torch-liquidation-bot@^3.0.0",
+        "package": "torch-liquidation-bot@^4.0.0",
         "flags": [],
         "label": "Install Torch Liquidation Bot (npm, optional -- SDK is bundled in lib/torchsdk/ and bot source is bundled under lib/kit on clawhub)"
       }
@@ -111,7 +111,7 @@
     "lending_liquidation_threshold_percent": 65,
     "lending_interest_rate_per_epoch_percent": 2,
     "lending_liquidation_bonus_percent": 10,
-    "lending_utilization_cap_percent": 50,
+    "lending_utilization_cap_percent": 70,
     "min_borrow_sol": 0.1,
     "default_scan_interval_ms": 30000,
     "min_scan_interval_ms": 5000

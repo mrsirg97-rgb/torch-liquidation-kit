@@ -19,15 +19,12 @@
 import { Connection, Keypair } from '@solana/web3.js'
 import {
   getTokens,
-  getLendingInfo,
-  getHolders,
-  getLoanPosition,
+  getAllLoanPositions,
   getVault,
   getVaultForWallet,
   buildLiquidateTransaction,
   confirmTransaction,
-  type LendingInfo,
-  type LoanPositionInfo,
+  type LoanPositionWithKey,
 } from 'torchsdk'
 import { loadConfig } from './config'
 import { sol, bpsToPercent, createLogger, decodeBase58 } from './utils'
@@ -51,48 +48,29 @@ const scanAndLiquidate = async (
   log('debug', `discovered ${tokens.length} migrated tokens`)
 
   for (const token of tokens) {
-    let lending: LendingInfo
+    let positions: LoanPositionWithKey[]
     try {
-      lending = await getLendingInfo(connection, token.mint)
+      const result = await getAllLoanPositions(connection, token.mint)
+      positions = result.positions
     } catch {
       continue // lending not enabled for this token
     }
 
-    if (!lending.active_loans || lending.active_loans === 0) continue
+    if (positions.length === 0) continue
 
     log(
       'debug',
-      `${token.symbol} — ${lending.active_loans} active loans, ` +
-        `threshold: ${bpsToPercent(lending.liquidation_threshold_bps)}, ` +
-        `bonus: ${bpsToPercent(lending.liquidation_bonus_bps)}`,
+      `${token.symbol} — ${positions.length} active loans`,
     )
 
-    // get holders as potential borrowers
-    let holders: { address: string }[]
-    try {
-      const result = await getHolders(connection, token.mint)
-      holders = result.holders
-    } catch {
-      log('debug', `${token.symbol} — could not fetch holders, skipping`)
-      continue
-    }
-
-    for (const holder of holders) {
-      let position: LoanPositionInfo
-      try {
-        position = await getLoanPosition(connection, token.mint, holder.address)
-      } catch {
-        continue // no loan position for this holder
-      }
-
-      // SDK provides health status directly — skip non-liquidatable positions
-      if (position.health !== 'liquidatable') continue
+    // positions are pre-sorted: liquidatable → at_risk → healthy
+    for (const position of positions) {
+      if (position.health !== 'liquidatable') break // sorted, so no more liquidatable after this
 
       log(
         'info',
-        `LIQUIDATABLE | ${token.symbol} | borrower=${holder.address.slice(0, 8)}... | ` +
-          `LTV=${position.current_ltv_bps != null ? bpsToPercent(position.current_ltv_bps) : '?'} > ` +
-          `threshold=${bpsToPercent(lending.liquidation_threshold_bps)} | ` +
+        `LIQUIDATABLE | ${token.symbol} | borrower=${position.borrower.slice(0, 8)}... | ` +
+          `LTV=${position.current_ltv_bps != null ? bpsToPercent(position.current_ltv_bps) : '?'} | ` +
           `owed=${sol(position.total_owed)} SOL`,
       )
 
@@ -101,7 +79,7 @@ const scanAndLiquidate = async (
         const { transaction, message } = await buildLiquidateTransaction(connection, {
           mint: token.mint,
           liquidator: agentKeypair.publicKey.toBase58(),
-          borrower: holder.address,
+          borrower: position.borrower,
           vault: vaultCreator,
         })
 
@@ -111,13 +89,13 @@ const scanAndLiquidate = async (
 
         log(
           'info',
-          `LIQUIDATED | ${token.symbol} | borrower=${holder.address.slice(0, 8)}... | ` +
+          `LIQUIDATED | ${token.symbol} | borrower=${position.borrower.slice(0, 8)}... | ` +
             `sig=${signature.slice(0, 16)}... | ${message}`,
         )
       } catch (err: any) {
         log(
           'warn',
-          `LIQUIDATION FAILED | ${token.symbol} | ${holder.address.slice(0, 8)}... | ${err.message}`,
+          `LIQUIDATION FAILED | ${token.symbol} | ${position.borrower.slice(0, 8)}... | ${err.message}`,
         )
       }
     }
