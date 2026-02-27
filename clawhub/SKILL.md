@@ -1,6 +1,6 @@
 ---
 name: torch-liquidation-bot
-version: "4.0.0"
+version: "4.0.1"
 description: Autonomous vault-based liquidation keeper for Torch Market lending on Solana. Scans all migrated tokens for underwater loan positions (LTV > 65%) using the SDK's built-in bulk loan scanner (getAllLoanPositions), builds and executes liquidation transactions through a Torch Vault, and collects a 10% collateral bonus. The agent keypair is generated in-process -- disposable, holds nothing of value. All SOL and collateral tokens route through the vault. The human principal creates the vault, funds it, links the agent, and retains full control. Built on torchsdk v3.7.22 and the Torch Market protocol.
 license: MIT
 disable-model-invocation: true
@@ -39,7 +39,7 @@ metadata:
         flags: []
         label: "Install Torch Liquidation Bot (npm, optional -- SDK is bundled in lib/torchsdk/ and bot source is bundled under lib/kit on clawhub)"
   author: torch-market
-  version: "4.0.0
+  version: "4.0.1"
   clawhub: https://clawhub.ai/mrsirg97-rgb/torch-liquidation-bot
   kit-source: https://github.com/mrsirg97-rgb/torch-liquidation-kit
   website: https://torch.market
@@ -77,7 +77,13 @@ metadata:
     - agent-infrastructure
     - custody-solutions
     - liquidation-keepers
-compatibility: Requires SOLANA_RPC_URL (HTTPS Solana RPC endpoint) and VAULT_CREATOR (vault creator pubkey) as environment variables. SOLANA_PRIVATE_KEY is optional -- the bot generates a fresh disposable keypair in-process if not provided. The agent wallet holds nothing of value (~0.01 SOL for gas). All liquidation proceeds (collateral tokens) route to the vault. The vault can be created and funded entirely by the human principal. The Torch SDK is bundled in lib/torchsdk/ -- all source included for full auditability. No API server dependency.
+compatibility: >-
+  REQUIRED: SOLANA_RPC_URL (HTTPS Solana RPC endpoint)
+  REQUIRED: VAULT_CREATOR (vault creator pubkey).
+  OPTIONAL: SOLANA_PRIVATE_KEY -- the bot generates a fresh disposable keypair in-process if not provided. The agent wallet holds nothing of value (~0.01 SOL for gas). All liquidation proceeds (collateral tokens) route to the vault. The vault can be created and funded entirely by the human principal. 
+  This skill sets disable-model-invocation: true -- it must not be invoked autonomously without explicit user initiation.
+  The Torch SDK is bundled in lib/torchsdk/ -- all source included for full auditability. No API server dependency.
+  The vault can be created and funded entirely by the human principal -- the agent never needs access to funds.
 ---
 
 # Torch Liquidation Bot
