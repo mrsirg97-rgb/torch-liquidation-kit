@@ -1,4 +1,4 @@
-# torch-liquidation-bot v4.0.0 (Vault Mode)
+# torch-liquidation-bot v4.0.1 (Vault Mode)
 
 Vault-based liquidation bot for [Torch Market](https://torch.market) on Solana. Generates an agent keypair in-process — no user wallet required. All operations route through a Torch Vault.
 
@@ -7,7 +7,7 @@ Vault-based liquidation bot for [Torch Market](https://torch.market) on Solana. 
 ## Install
 
 ```bash
-npm install torch-liquidation-bot@4.0.0
+npm install torch-liquidation-bot@4.0.1
 ```
 
 ## Quick Start
@@ -111,7 +111,7 @@ for (const token of tokens) {
 src/
 ├── types.ts    — BotConfig interface
 ├── config.ts   — loadConfig() (SOLANA_RPC_URL, VAULT_CREATOR, SOLANA_PRIVATE_KEY, SCAN_INTERVAL_MS, LOG_LEVEL)
-├── utils.ts    — sol(), bpsToPercent(), createLogger()
+├── utils.ts    — sol(), bpsToPercent(), withTimeout(), createLogger()
 └── index.ts    — vault-based liquidation loop
 ```
 
@@ -139,6 +139,7 @@ pnpm test
 - Agent keypair generated in-process with `Keypair.generate()` (or loaded from optional `SOLANA_PRIVATE_KEY`)
 - Vault model: agent is a stateless controller, all value stays in the vault
 - Authority can unlink the agent wallet instantly via `buildUnlinkWalletTransaction()`
+- All SDK calls wrapped with 30-second timeout — a hanging RPC cannot stall the bot indefinitely
 - Minimal dependencies: `@solana/web3.js` + `torchsdk` -- both pinned to exact versions
 - No post-install hooks, no remote code fetching
 - `disable-model-invocation: true` -- agents cannot invoke this skill autonomously
