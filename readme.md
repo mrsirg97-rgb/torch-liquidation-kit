@@ -1,4 +1,4 @@
-# torch-liquidation-bot v4.0.1 (Vault Mode)
+# torch-liquidation-bot v4.0.2 (Vault Mode)
 
 Vault-based liquidation bot for [Torch Market](https://torch.market) on Solana. Generates an agent keypair in-process — no user wallet required. All operations route through a Torch Vault.
 
@@ -7,7 +7,7 @@ Vault-based liquidation bot for [Torch Market](https://torch.market) on Solana. 
 ## Install
 
 ```bash
-npm install torch-liquidation-bot@4.0.1
+npm install torch-liquidation-bot@4.0.2
 ```
 
 ## Quick Start

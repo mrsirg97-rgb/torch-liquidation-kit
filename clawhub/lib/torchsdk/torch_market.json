@@ -2,7 +2,7 @@
     "address": "8hbUkonssSEEtkqzwM7ZcZrD9evacM92TcWSooVF4BeT",
     "metadata": {
         "name": "torch_market",
-        "version": "3.7.7",
+        "version": "3.7.8",
         "spec": "0.1.0",
         "description": "torch.market"
     },
@@ -795,6 +795,13 @@
                             }
                         ]
                     }
+                },
+                {
+                    "name": "creator",
+                    "docs": [
+                        "[V34] Creator wallet — receives SOL share during bonding (0.2%→1%)"
+                    ],
+                    "writable": true
                 },
                 {
                     "name": "torch_vault",
@@ -3850,6 +3857,13 @@
                             }
                         ]
                     }
+                },
+                {
+                    "name": "creator",
+                    "docs": [
+                        "[V34] Creator wallet — receives 15% of fee swap proceeds"
+                    ],
+                    "writable": true
                 },
                 {
                     "name": "treasury",

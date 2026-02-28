@@ -6,7 +6,7 @@ We used [Kani](https://model-checking.github.io/kani/), a formal verification to
 
 This is **not** a security audit. It proves the arithmetic is correct, but does not cover access control, account validation, or economic attacks. See [What Is NOT Verified](#what-is-not-verified) for full scope limitations.
 
-**39 proof harnesses. All passing. Zero failures.**
+**43 proof harnesses. All passing. Zero failures.**
 
 ---
 
@@ -15,8 +15,8 @@ This is **not** a security audit. It proves the arithmetic is correct, but does 
 torch_market's core arithmetic has been formally verified using [Kani](https://model-checking.github.io/kani/), a Rust model checker backed by the CBMC bounded model checker. Kani exhaustively proves properties hold for **all** valid inputs within constrained ranges -- not just sampled test cases.
 
 **Tool:** Kani Rust Verifier 0.67.0 / CBMC 6.8.0
-**Target:** `torch_market` v3.7.7
-**Harnesses:** 39 proof harnesses, all passing
+**Target:** `torch_market` v3.7.8
+**Harnesses:** 43 proof harnesses, all passing
 **Source:** `programs/torch_market/src/kani_proofs.rs`
 
 ## What Is Formally Verified
@@ -31,7 +31,7 @@ The proofs cover the **pure arithmetic layer** -- every fee calculation, bonding
 | `verify_protocol_fee_split` | `dev_share + protocol_portion == protocol_fee_total` | 0.001-200 SOL |
 | `verify_treasury_rate_bounds` | `rate in [500, 2000]` (5-20%) flat across all tiers | 0-target SOL reserves |
 | `verify_treasury_rate_monotonic` | More reserves -> lower treasury rate | 0-target SOL (two symbolic) |
-| `verify_sol_distribution_conservation` | `curve + treasury + dev + protocol == sol_amount` (zero SOL created or lost) | 0.001-10 SOL per trade, 0-target SOL reserves |
+| `verify_sol_distribution_conservation` | `curve + treasury + creator + dev + protocol == sol_amount` (zero SOL created or lost, V34 5-way sum) | 0.001-10 SOL per trade, 0-target SOL reserves |
 | `verify_curve_tokens_bounded_legacy` | `tokens_out < virtual_token_reserves` (can't mint from thin air) | Legacy pool state space (IVT=107.3T) |
 | `verify_curve_tokens_bounded_v25` | Same property for V27 per-tier reserves | V27 pool state space (IVT=756.25M tokens) |
 | `verify_token_split_conservation` | `tokens_to_buyer + tokens_to_treasury == tokens_out` | 0 to TOTAL_SUPPLY |
@@ -108,7 +108,18 @@ These harnesses verify the V31 token distribution model where IVS = 3*bonding_ta
 |---------|----------|-------------|
 | `verify_sell_fee_always_zero` | `SELL_FEE_BPS == 0` and computed fee == 0 for all valid sol_out | 0.001-200 SOL |
 
-### Lending Lifecycle (Harnesses 36-38)
+### Creator Revenue (Harnesses 36-39) — V34
+
+These harnesses verify the V34 creator revenue arithmetic: bonding SOL share rate bounds, monotonicity, safety of the treasury-creator subtraction, and post-migration fee share conservation.
+
+| Harness | Property | Input Range |
+|---------|----------|-------------|
+| `verify_creator_rate_bounds` | `creator_rate in [20, 100]` bps (0.2%-1%) for all bonding progress | 0-target SOL reserves |
+| `verify_creator_rate_monotonic` | More reserves → higher creator rate | 0-target SOL (two symbolic) |
+| `verify_creator_rate_less_than_treasury_rate` | `creator_rate < treasury_rate` at all points (subtraction safety) | 0-target SOL reserves |
+| `verify_creator_fee_share_bounded` | 15% share ≤ total, `creator + treasury == total` (conservation) | 0.001-200 SOL fee swap proceeds |
+
+### Lending Lifecycle (Harnesses 40-42)
 
 These harnesses verify end-to-end lending correctness: borrow → (optional interest accrual) → repay, proving treasury SOL conservation, correct interest-first repayment ordering, and loan zeroing.
 
@@ -158,7 +169,7 @@ Eight harnesses were dropped during verification because they prove structurally
 | `verify_ltv_100_percent` | `(v * 10000) / v == 10000` is a mathematical tautology. SAT solvers cannot efficiently prove symbolic u128 division cancellation. |
 | `verify_buyback_respects_reserve` | Buyback reserve/amount constraints are enforced by handler-level checks, not arithmetic. Property is structural given the config validation. |
 
-These properties remain true by construction. The remaining 39 harnesses cover every non-tautological safety property.
+These properties remain true by construction. The remaining 43 harnesses cover every non-tautological safety property.
 
 ## What Is NOT Verified
 
@@ -199,7 +210,7 @@ cargo kani
 cargo kani --harness verify_buy_fee_conservation
 ```
 
-All 39 harnesses pass. Most complete in under 1 second; the slowest (`verify_transfer_fee_bounds`, `verify_treasury_rate_monotonic`) take 30-55 seconds due to larger SAT formula complexity.
+All 43 harnesses pass. Most complete in under 1 second; the slowest (`verify_transfer_fee_bounds`, `verify_treasury_rate_monotonic`) take 30-55 seconds due to larger SAT formula complexity.
 
 ## Constants Reference
 
@@ -221,7 +232,7 @@ All 39 harnesses pass. Most complete in under 1 second; the slowest (`verify_tra
 | `TREASURY_SOL_MAX_BPS` | 2000 | 20% max treasury SOL rate (flat, all tiers) |
 | `DEV_WALLET_SHARE_BPS` | 1000 | [V32] 10% of protocol fee to dev (was 25%) |
 | `BURN_RATE_BPS` | 1000 | 10% token burn on buy |
-| `TRANSFER_FEE_BPS` | 3 | 0.03% Token-2022 transfer fee |
+| `TRANSFER_FEE_BPS` | 4 | [V34] 0.04% Token-2022 transfer fee (was 3 bps, old tokens retain 3) |
 | `DEFAULT_INTEREST_RATE_BPS` | 200 | 2% lending interest per epoch |
 | `DEFAULT_LIQUIDATION_BONUS_BPS` | 1000 | 10% liquidation bonus |
 | `DEFAULT_LENDING_UTILIZATION_CAP_BPS` | 7000 | [V33] 70% max treasury SOL lendable (was 50%) |
@@ -231,4 +242,7 @@ All 39 harnesses pass. Most complete in under 1 second; the slowest (`verify_tra
 | `SELL_ALL_TOKEN_THRESHOLD` | 1,000,000,000,000 | 1M tokens -- sell 100% below this |
 | `MIN_EPOCH_VOLUME_ELIGIBILITY` | 2,000,000,000 | [V32] 2 SOL min epoch volume for rewards (was 10 SOL) |
 | `MIN_CLAIM_AMOUNT` | 100,000,000 | [V32] 0.1 SOL min claim amount |
+| `CREATOR_SOL_MIN_BPS` | 20 | [V34] 0.2% creator SOL share at bonding start |
+| `CREATOR_SOL_MAX_BPS` | 100 | [V34] 1% creator SOL share at bonding completion |
+| `CREATOR_FEE_SHARE_BPS` | 1,500 | [V34] 15% creator share of fee swap proceeds |
 | `MIN_SOL_AMOUNT` | 1,000,000 | 0.001 SOL minimum |

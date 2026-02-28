@@ -2,7 +2,7 @@
 
 **Audit Date:** February 27, 2026
 **Auditor:** Claude Opus 4.6 (Anthropic)
-**Bot Version:** 4.0.1
+**Bot Version:** 4.0.2
 **Kit Version:** 2.0.0
 **SDK Version:** torchsdk 3.7.22
 **On-Chain Program:** `8hbUkonssSEEtkqzwM7ZcZrD9evacM92TcWSooVF4BeT` (V3.7.7, 27 instructions)
@@ -444,7 +444,7 @@ No credentials are sent. If either service is unreachable, the SDK degrades grac
 
 ## Conclusion
 
-The Torch Liquidation Bot v4.0.1 is a cleaner, more efficient keeper with correct vault integration and robust error handling. Key findings:
+The Torch Liquidation Bot v4.0.2 is a cleaner, more efficient keeper with correct vault integration and robust error handling. Key findings:
 
 1. **Key safety is correct** — in-process `Keypair.generate()` by default, optional `SOLANA_PRIVATE_KEY` for persistence. No key logging, no key transmission. Unchanged from v3.0.2.
 2. **Vault integration is correct** — `vault` param passed to `buildLiquidateTransaction`, SOL from vault, collateral to vault ATA. Unchanged from v3.0.2.
@@ -463,7 +463,7 @@ This audit was performed by Claude Opus 4.6 (Anthropic) on February 27, 2026. Al
 
 **Auditor:** Claude Opus 4.6
 **Date:** 2026-02-27
-**Bot Version:** 4.0.1
+**Bot Version:** 4.0.2
 **Kit Version:** 2.0.0
 **SDK Version:** torchsdk 3.7.22
 **On-Chain Version:** V3.7.7 (Program ID: `8hbUkonssSEEtkqzwM7ZcZrD9evacM92TcWSooVF4BeT`, 27 instructions)

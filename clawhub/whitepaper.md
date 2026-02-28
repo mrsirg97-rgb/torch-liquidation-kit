@@ -36,7 +36,7 @@ Per-Token Economy:
   │                            Migration ──── Raydium DEX Pool
   │
   └── Token-2022 Extensions
-       ├── Transfer Fee (0.03%)
+       ├── Transfer Fee (0.04%)
        └── Confidential Transfer (optional)
 
 Protocol Layer:
@@ -76,8 +76,10 @@ User spends 1 SOL
         ├── 1% → Token Treasury Fee (lifetime)
         │
         └── 98% → Remainder
-                  ├── V2.3 Dynamic → Token Treasury (SOL)
-                  │   └── 20% at start → 5% at completion
+                  ├── V2.3 Dynamic → 3-Way Split (V34)
+                  │   ├── Token Treasury (19.8%→4% at start→end)
+                  │   ├── Creator Wallet (0.2%→1% at start→end)
+                  │   └── Total: 20% at start → 5% at completion
                   └── V2.3 Dynamic → Bonding Curve
                       └── 80% at start → 95% at completion
                                 ├── 90% → User (tokens)
@@ -98,7 +100,7 @@ The token treasury creates a positive-sum dynamic where every participant's acti
 
 1. **Treasury Accumulation**: The treasury accumulates SOL with every buy. Post-migration, harvested transfer fees are sold to SOL, growing the treasury's lending pool and earning yield through community borrowing.
 2. **Lending Yield**: Treasury SOL is lent to token holders who borrow against their collateral. Interest paid by borrowers flows back into the treasury, compounding its value over time.
-3. **No Insider Advantage**: Unlike traditional launches where team allocations can dump on retail, the treasury mechanism ensures that value flows back to all participants. There is no creator allocation, only a 100% fair launch.
+3. **No Insider Advantage**: Unlike traditional launches where team allocations can dump on retail, the treasury mechanism ensures that value flows back to all participants. There is no creator token allocation — creators earn through three revenue streams: a 0.2%→1% SOL share during bonding, 15% of post-migration fee swap proceeds, and star payouts.
 4. **Community-Funded Migration**: The treasury pays the 0.15 SOL Raydium pool creation fee automatically. Early supporters collectively fund the DEX migration without any single party bearing the cost.
 5. **Long-term Alignment**: Because the treasury continuously earns lending yield and epoch rewards, early sellers forfeit future treasury benefits. This incentivizes holding and community building over quick flips.
 
@@ -133,7 +135,7 @@ New buyers may also be more likely to purchase a token seeing that it is "safer"
 
 - The fee structure itself (sybiling costs more in fees)
 - The community treasury (even sybil buyers fund the collective)
-- Post-migration transfer fees (every transfer costs 0.03%)
+- Post-migration transfer fees (every transfer costs 0.04%)
 
 ---
 
@@ -148,7 +150,7 @@ Migration is **permissionless** — any wallet can trigger the migration for any
 The migration is executed as a two-step atomic process within a single transaction:
 
 1. **Fund WSOL**: Wrap the bonding curve's SOL reserves into a WSOL token account
-2. **Migrate to DEX**: Vote finalization, pool creation on Raydium CPMM, liquidity provision (SOL + tokens), LP token burn (liquidity locked forever), transfer fee activation (0.03% on all future transfers)
+2. **Migrate to DEX**: Vote finalization, pool creation on Raydium CPMM, liquidity provision (SOL + tokens), LP token burn (liquidity locked forever), transfer fee activation (0.04% on all future transfers)
 
 When your token bonds, anyone can complete the migration. The community is not dependent on the creator or any centralized operator.
 
@@ -156,28 +158,36 @@ When your token bonds, anyone can complete the migration. The community is not d
 
 ## 5. Post-Migration: Treasury Accumulation Loop
 
-Once a token migrates to Raydium, the treasury continues growing through the **0.03% transfer fee** and **lending yield**.
+Once a token migrates to Raydium, the treasury continues growing through the **0.04% transfer fee** and **lending yield**.
 
-### The 0.03% Transfer Fee (Token-2022)
+### The 0.04% Transfer Fee (Token-2022)
 
-All `torch.market` tokens use Solana's Token-2022 standard with a built-in **0.03% transfer fee** (3 basis points). This fee is collected on every transfer — wallet to wallet, DEX trades, everything.
+All `torch.market` tokens use Solana's Token-2022 standard with a built-in **0.04% transfer fee** (4 basis points). This fee is collected on every transfer — wallet to wallet, DEX trades, everything.
 
 ```
 User transfers 100,000 tokens
         │
-        └── 0.03% (3 tokens) → Withheld in mint
+        └── 0.04% (4 tokens) → Withheld in mint
                             │
                             └── Harvested → Token Treasury
+                                        │
+                                   swap_fees_to_sol
+                                        │
+                                   ┌────┴────┐
+                                   │         │
+                                   ▼         ▼
+                              Treasury   Creator
+                               (85%)     (15%)
 ```
 
-The transfer fee is not extracted from the sender or receiver as a separate charge — it's automatically withheld from the transferred amount at the Solana runtime level. The rate is immutable once set at token creation.
+The transfer fee is not extracted from the sender or receiver as a separate charge — it's automatically withheld from the transferred amount at the Solana runtime level. The rate is immutable once set at token creation. Pre-V34 tokens retain their original 3 bps (0.03%) rate.
 
 ### Harvest and Sell Cycle
 
 The accumulated transfer fees create a perpetual treasury growth engine:
 
 1. **Harvest** (permissionless): Anyone can call `harvest_fees` to collect withheld tokens from transfers into the token treasury's token account.
-2. **Swap to SOL** (permissionless): Anyone can call `swap_fees_to_sol` to sell the harvested tokens back to SOL via Raydium, adding the proceeds to the treasury's SOL balance. The SDK bundles harvest + swap in one atomic transaction via `buildSwapFeesToSolTransaction`.
+2. **Swap to SOL** (permissionless): Anyone can call `swap_fees_to_sol` to sell the harvested tokens back to SOL via Raydium. Proceeds are split 85% to treasury SOL balance, 15% to creator wallet. The SDK bundles harvest + swap in one atomic transaction via `buildSwapFeesToSolTransaction`.
 3. **Lend**: Treasury SOL is available for community members to borrow against their token collateral (see Section 6).
 4. **Earn**: Interest from borrowers flows back into the treasury, compounding its value.
 
@@ -193,8 +203,8 @@ The treasury accumulates SOL through fee harvesting and lending interest, creati
 
 | Phase | SOL Source | Token Destination |
 |-------|-----------|-------------------|
-| Bonding | 1% fee + 20%→5% of buys (dynamic) | Community treasury (vote vault) |
-| DEX | 0.03% transfer fee → sell to SOL | Treasury SOL → lending pool + epoch rewards |
+| Bonding | 1% fee + 20%→5% of buys (dynamic, 3-way: treasury + creator + curve) | Community treasury (vote vault) |
+| DEX | 0.04% transfer fee → sell to SOL (85% treasury, 15% creator) | Treasury SOL → lending pool + epoch rewards |
 
 ---
 
@@ -402,7 +412,7 @@ The on-chain program is a directed graph of economic relationships. PDA seeds de
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────────────┐
-│                          TORCH MARKET PROTOCOL v3.7.7                                 │
+│                          TORCH MARKET PROTOCOL v3.7.8                                 │
 ├─────────────────────────────────────────────────────────────────────────────────────┤
 │                                                                                      │
 │  ┌─────────────────────────────────────────────────────────────────────────────┐    │
@@ -422,7 +432,7 @@ The on-chain program is a directed graph of economic relationships. PDA seeds de
 │  │  │    Token     │    │   Bonding    │    │   Treasury   │                   │    │
 │  │  │   (Mint)     │───▶│    Curve     │───▶│  (lending,   │                   │    │
 │  │  │  Token-2022  │    │  (pricing,   │    │   stars,     │                   │    │
-│  │  │ 0.03% xfer │    │   voting)    │    │   lending)   │                   │    │
+│  │  │ 0.04% xfer │    │   voting)    │    │   lending)   │                   │    │
 │  │  └──────────────┘    └──────┬───────┘    └──────────────┘                   │    │
 │  │                             │                                                │    │
 │  │         ┌───────────────────┼───────────────────┐                           │    │
@@ -489,7 +499,7 @@ The protocol uses 12 on-chain account types, all deterministic PDAs:
 
 ### Instruction Set
 
-The V3.7.7 program exposes 27 instructions across 9 handler domains:
+The V3.7.8 program exposes 27 instructions across 9 handler domains:
 
 | Domain | Instructions |
 |--------|-------------|
@@ -511,6 +521,8 @@ The V3.7.7 program exposes 27 instructions across 9 handler domains:
 > **Note (V3.7.6):** V32 protocol treasury rebalance. Reserve floor removed (0 SOL). Volume eligibility 10→2 SOL. Min claim 0.1 SOL. Fee split 90/10 (was 75/25). 39 Kani proofs.
 >
 > **Note (V3.7.7):** V33 buyback removed, lending extended. `execute_auto_buyback` instruction removed (27 instructions). Lending utilization cap 50%→70%. Treasury simplified to fee harvest → sell → SOL → lending yield + epoch rewards.
+>
+> **Note (V3.7.8):** V34 creator revenue. Three creator income streams: bonding SOL share (0.2%→1% carved from treasury rate), 15% of post-migration fee swap proceeds, star payout (cost reduced 0.05→0.02 SOL). Transfer fee 3→4 bps (new tokens only). `creator` account added to `buy` and `swap_fees_to_sol`. 43 Kani proofs.
 
 ### Bonding Curve Formula
 
@@ -551,18 +563,18 @@ Price: price      = virtual_sol_reserves / virtual_token_reserves
       ┌────┴────┐                │              ┌──────┴──────┐
       │         │                │              │             │
       ▼         ▼                ▼              ▼             ▼
-┌─────────┐ ┌─────────┐   ┌──────────┐   ┌───────────┐ ┌───────────┐
-│Protocol │ │  Dev    │   │  Token   │   │  Token   │ │  Bonding  │
-│Treasury │ │ Wallet  │   │ Treasury │   │ Treasury │ │   Curve   │
-│  (90%)  │ │  (10%)  │   │  (100%)  │   │(20%→5%)  │ │(80%→95%)  │
-└─────────┘ └─────────┘   └────┬─────┘   └───────────┘ └─────┬─────┘
-                               │                             │
-                               │                              ▼
-                               │                        ┌─────────────┐
-                               │                        │   TOKENS    │
-                               │                        │    OUT      │
-                               │                        └──────┬──────┘
-                               │                               │
+┌─────────┐ ┌─────────┐   ┌──────────┐   ┌───────────┐ ┌──────────┐ ┌───────────┐
+│Protocol │ │  Dev    │   │  Token   │   │  Token    │ │ Creator  │ │  Bonding  │
+│Treasury │ │ Wallet  │   │ Treasury │   │ Treasury  │ │ Wallet   │ │   Curve   │
+│  (90%)  │ │  (10%)  │   │  (100%)  │   │(19.8→4%)*│ │(0.2→1%)*│ │(80%→95%)* │
+└─────────┘ └─────────┘   └────┬─────┘   └───────────┘ └──────────┘ └─────┬─────┘
+                               │                                           │
+                               │    *V34: Treasury split 3 ways:           ▼
+                               │    Total 20%→5% (V25 flat decay)   ┌─────────────┐
+                               │    Creator 0.2%→1% (carved out)    │   TOKENS    │
+                               │    Treasury gets remainder         │    OUT      │
+                               │                                    └──────┬──────┘
+                               │                                           │
                                │                      ┌────────┴────────┐
                                │                      │                 │
                                ▼                      ▼                 ▼
@@ -602,7 +614,7 @@ Pool accounts validated via PDA derivation constraints in Anchor contexts (`deri
 
 ### Formal Verification
 
-Core arithmetic is formally verified with [Kani](https://model-checking.github.io/kani/) — 39 proof harnesses, all passing, covering every possible input in constrained ranges. Proofs cover: fee calculations, bonding curve pricing, lending formulas (borrow/repay/liquidate lifecycle), reward distribution, sell-cycle ratio math, migration conservation, and V25/V27 token distribution. No SOL can be created from nothing, no tokens can be minted from thin air, and no fees can exceed their stated rates. See [VERIFICATION.md](https://torch.market/verification.md).
+Core arithmetic is formally verified with [Kani](https://model-checking.github.io/kani/) — 43 proof harnesses, all passing, covering every possible input in constrained ranges. Proofs cover: fee calculations, bonding curve pricing, lending formulas (borrow/repay/liquidate lifecycle), reward distribution, sell-cycle ratio math, migration conservation, and V25/V27 token distribution. No SOL can be created from nothing, no tokens can be minted from thin air, and no fees can exceed their stated rates. See [VERIFICATION.md](https://torch.market/verification.md).
 
 ### Security Audit History
 
@@ -620,7 +632,7 @@ Pool accounts were reported as unconstrained. Assessment: `validate_pool_account
 CREATE → BONDING → COMPLETE → VOTE → MIGRATE → DEX
    │                                              │
    │                                              ▼
-   │                                   [0.03% Transfer Fee]
+   │                                   [0.04% Transfer Fee]
    │                                              │
    │                                              ▼
    │                                    HARVEST → SWAP TO SOL → LENDING → YIELD
@@ -658,7 +670,7 @@ Every path in this graph feeds value back into the system. There is no terminal 
 | Treasury SOL Share | 20%→5% | Dynamic: decays as bonding progresses |
 | Token Treasury Fee | 1% | Fee on all buys (lifetime) |
 | Protocol Fee | 1% | Fee during bonding (90% treasury, 10% dev) |
-| Transfer Fee | 0.03% (3 bps) | Post-migration fee on all transfers (immutable per mint) |
+| Transfer Fee | 0.04% (4 bps) | [V34] Post-migration fee on all transfers (immutable per mint, pre-V34 tokens retain 3 bps) |
 | Inactivity Period | 7 days | Time before failed token can be reclaimed |
 | Revival Threshold (V27) | 3BT/8 per tier (18.75 / 37.5 / 75 SOL) | SOL needed to revive a reclaimed token |
 | Voting Duration | ~24 hours | Time for community to vote on burn/return |
@@ -705,6 +717,7 @@ Every path in this graph feeds value back into the system. There is no terminal 
 | V3.7.5 | **V31 Zero-Burn Migration.** CURVE_SUPPLY 750M→700M, TREASURY_LOCK 250M→300M. Transfer fee 0.1%→0.03%. Vote return → treasury lock. |
 | V3.7.6 | **V32 Protocol Treasury Rebalance.** Reserve floor removed. Volume eligibility 10→2 SOL. Min claim 0.1 SOL. Fee split 90/10. 39 Kani proofs. |
 | V3.7.7 | **V33 Buyback Removed, Lending Extended.** `execute_auto_buyback` removed (27 instructions). Lending utilization cap 50%→70%. Treasury simplified to: fee harvest → sell → SOL → lending yield + epoch rewards. |
+| V3.7.8 | **V34 Creator Revenue + Transfer Fee Bump.** Three creator income streams: bonding SOL share (0.2%→1%), post-migration fee share (85/15 treasury/creator), star payout. Star cost 0.05→0.02 SOL. Transfer fee 3→4 bps (new tokens only). 43 Kani proofs. |
 
 ---
 

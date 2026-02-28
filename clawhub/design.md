@@ -1,6 +1,6 @@
 # Torch Liquidation Bot — Design Document
 
-> Autonomous vault-based liquidation keeper for Torch Market lending on Solana. Version 4.0.1.
+> Autonomous vault-based liquidation keeper for Torch Market lending on Solana. Version 4.0.2.
 
 ## Overview
 
@@ -250,3 +250,4 @@ Tests run against a Surfpool mainnet fork:
 | 3.0.2 | Optional `SOLANA_PRIVATE_KEY` support (base58 or JSON byte array) for persistent agent wallet. Inline base58 decoder (no bs58 dependency). `SOLANA_RPC_URL` as primary env var with `RPC_URL` fallback. `VAULT_CREATOR` added to manifest `requires.env`. ClawHub audit consistency fixes. |
 | 4.0.0 | **Bulk loan scanning via `getAllLoanPositions`.** Replaces N+1 scan pattern (`getLendingInfo` → `getHolders` → per-holder `getLoanPosition`) with single RPC call per token. Positions pre-sorted by health with early break. Updated to `torchsdk@3.7.22` (V33 buyback removal, 70% utilization cap). Kit version 2.0.0. |
 | 4.0.1 | **RPC timeout via `withTimeout`.** Address L-1 Vulnerability with Denial-of-Service.
+| 4.0.2 | **Torchsdk Version Bump** update to latest sdk v3.7.23

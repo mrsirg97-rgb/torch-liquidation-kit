@@ -104,6 +104,7 @@ const buildBuyTransactionInternal = async (connection, mintStr, buyerStr, amount
         globalConfig: globalConfigPda,
         devWallet: globalConfigAccount.devWallet || globalConfigAccount.dev_wallet,
         protocolTreasury: protocolTreasuryPda,
+        creator: bondingCurve.creator,
         mint,
         bondingCurve: bondingCurvePda,
         tokenVault: bondingCurveTokenAccount,
@@ -1233,6 +1234,11 @@ const buildSwapFeesToSolTransaction = async (connection, params) => {
     const wsolVault = raydium.isWsolToken0 ? raydium.token0Vault : raydium.token1Vault;
     const provider = makeDummyProvider(connection, payer);
     const program = new anchor_1.Program(torch_market_json_1.default, provider);
+    // [V34] Fetch bonding curve to get creator address for fee split
+    const tokenData = await (0, tokens_1.fetchTokenRaw)(connection, mint);
+    if (!tokenData)
+        throw new Error(`Token not found: ${mintStr}`);
+    const creator = tokenData.bondingCurve.creator;
     // Helper: build the harvest instruction with given sources
     const buildHarvestIx = async (sources) => {
         return program.methods
@@ -1261,6 +1267,7 @@ const buildSwapFeesToSolTransaction = async (connection, params) => {
             payer,
             mint,
             bondingCurve: bondingCurvePda,
+            creator,
             treasury: treasuryPda,
             treasuryTokenAccount,
             treasuryWsol,
