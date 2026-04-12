@@ -1,7 +1,7 @@
 {
   "name": "Torch Liquidation Bot",
-  "description": "Autonomous vault-based liquidation keeper for Torch Market lending on Solana. Scans all migrated tokens for underwater loan positions (LTV > 65%) using the SDK's built-in bulk loan scanner (getAllLoanPositions), builds and executes liquidation transactions through a Torch Vault, and collects a 10% collateral bonus. The agent keypair is generated in-process -- disposable, holds nothing of value. All SOL and collateral tokens route through the vault. The human principal creates the vault, funds it, links the agent, and retains full control. Built on torchsdk v3.7.22 and the Torch Market protocol.",
-  "version": "4.0.4",
+  "description": "Autonomous vault-based liquidation keeper for Torch Market lending on Solana. Scans all migrated tokens for underwater loan positions using the SDK's bulk loan scanner (getAllLoanPositions), builds and executes liquidation transactions through a Torch Vault, and collects a 10% collateral bonus. The agent keypair is generated in-process -- disposable, holds nothing of value. All SOL and collateral tokens route through the vault. The human principal creates the vault, funds it, links the agent, and retains full control.",
+  "version": "10.0.0",
   "type": "protocol",
   "disable-model-invocation": true,
   "website": "https://torch.market",
@@ -24,13 +24,13 @@
       },
       {
         "name": "VAULT_CREATOR",
-        "description": "Vault creator pubkey -- identifies which Torch Vault the bot operates through. Required.",
+        "description": "Vault creator pubkey -- identifies which Torch Vault the bot operates through",
         "sensitive": false,
         "required": true
       },
       {
         "name": "SOLANA_PRIVATE_KEY",
-        "description": "Disposable controller keypair (base58 or byte array JSON). Optional -- the bot generates a fresh keypair in-process if not provided (recommended). If provided, should be a fresh keypair with ~0.01 SOL for gas. Holds no value. All liquidation capital lives in the vault.",
+        "description": "Disposable controller keypair (base58 or byte array JSON). Optional -- the bot generates a fresh keypair in-process if not provided (recommended). Should be a fresh keypair with ~0.01 SOL for gas. Holds no value. All liquidation capital lives in the vault. NEVER supply a vault authority key.",
         "sensitive": true,
         "required": false
       }
@@ -39,8 +39,7 @@
       {
         "id": "npm-torch-liquidation-bot",
         "kind": "npm",
-        "package": "torch-liquidation-bot@^4.0.2",
-        "flags": [],
+        "package": "torch-liquidation-bot@^10.0.0",
         "label": "Install Torch Liquidation Bot (npm, optional -- SDK is bundled in lib/torchsdk/ and bot source is bundled under lib/kit on clawhub)"
       }
     ]
@@ -54,6 +53,8 @@
     "autonomous-scan-loop",
     "in-process-keypair",
     "read-only-mode",
+    "versioned-transactions",
+    "address-lookup-tables",
     "said-verification"
   ],
   "chain": "solana",
@@ -65,54 +66,30 @@
     "docs": "https://torch-market-docs.vercel.app"
   },
   "actions": [
-    {
-      "name": "TORCH_SCAN_LENDING_MARKETS",
-      "description": "Discover all migrated tokens and check their lending state for active loans"
-    },
-    {
-      "name": "TORCH_CHECK_LOAN_HEALTH",
-      "description": "Check a borrower's loan position -- collateral, debt, interest, LTV, health status"
-    },
-    {
-      "name": "TORCH_LIQUIDATE",
-      "description": "Liquidate underwater loan position (LTV > 65%) via vault -- vault SOL pays debt, collateral tokens at 10% discount go to vault ATA"
-    },
-    {
-      "name": "TORCH_GET_VAULT",
-      "description": "Get vault state by creator -- SOL balance, linked wallets, authority, token holdings"
-    },
-    {
-      "name": "TORCH_GET_VAULT_FOR_WALLET",
-      "description": "Reverse lookup -- find which vault a controller wallet is linked to"
-    },
-    {
-      "name": "TORCH_GET_LENDING_INFO",
-      "description": "Get lending configuration and state for a migrated token (rates, caps, active loans)"
-    },
-    {
-      "name": "TORCH_GET_LOAN",
-      "description": "Get loan position details for a wallet -- collateral, debt, interest, LTV, health status"
-    },
-    {
-      "name": "TORCH_LIST_TOKENS",
-      "description": "List migrated tokens with active lending markets"
-    },
-    {
-      "name": "TORCH_GET_TOKEN",
-      "description": "Get detailed token info including price, treasury state, and lending parameters"
-    },
-    {
-      "name": "TORCH_CONFIRM",
-      "description": "Confirm transaction on-chain via Solana RPC -- verifies signer, checks Torch instructions, determines event type. Does NOT contact SAID Protocol."
-    }
+    { "name": "TORCH_SCAN_LENDING_MARKETS", "description": "Discover all migrated tokens and check their lending state for active loans" },
+    { "name": "TORCH_CHECK_LOAN_HEALTH", "description": "Check a borrower's loan position -- collateral, debt, interest, LTV, health status" },
+    { "name": "TORCH_LIQUIDATE", "description": "Liquidate underwater loan position (LTV > 65%) via vault -- vault SOL pays debt, collateral tokens at 10% discount go to vault ATA" },
+    { "name": "TORCH_GET_VAULT", "description": "Vault state: SOL balance, linked wallets, authority" },
+    { "name": "TORCH_GET_VAULT_FOR_WALLET", "description": "Reverse lookup: find vault by linked wallet" },
+    { "name": "TORCH_GET_LENDING_INFO", "description": "Lending parameters and pool state for migrated token" },
+    { "name": "TORCH_GET_LOAN", "description": "Loan position: collateral, debt, LTV, health" },
+    { "name": "TORCH_GET_ALL_LOAN_POSITIONS", "description": "All loans sorted by liquidation risk" },
+    { "name": "TORCH_LIST_TOKENS", "description": "List tokens with filtering and sorting" },
+    { "name": "TORCH_GET_TOKEN", "description": "Full token detail: price, treasury, status" },
+    { "name": "TORCH_CONFIRM", "description": "Confirm transaction on-chain via Solana RPC -- verifies signer, checks Torch instructions, determines event type" }
   ],
   "constants": {
-    "lending_max_ltv_percent": 50,
-    "lending_liquidation_threshold_percent": 65,
-    "lending_interest_rate_per_epoch_percent": 2,
-    "lending_liquidation_bonus_percent": 10,
-    "lending_utilization_cap_percent": 70,
-    "min_borrow_sol": 0.1,
+    "lending": {
+      "max_ltv_bps": "depth-adaptive: 2500 (<50 SOL), 3500 (50-200), 4500 (200-500), 5000 (500+)",
+      "liquidation_threshold_bps": 6500,
+      "interest_rate_bps": 200,
+      "liquidation_bonus_bps": 1000,
+      "utilization_cap_bps": 8000,
+      "min_borrow_sol": 0.1,
+      "min_pool_sol": 5,
+      "depth_tiers_sol": [5, 50, 200, 500],
+      "depth_ltv_bps": [0, 2500, 3500, 4500, 5000]
+    },
     "default_scan_interval_ms": 30000,
     "min_scan_interval_ms": 5000
   },
@@ -131,34 +108,34 @@
     "transaction_expiry_seconds": 60,
     "open_source": true,
     "sdk_audited": true,
-    "rpc_timeout_seconds": 30
+    "rpc_timeout_seconds": 30,
+    "autonomous_invocation_blocked": true,
+    "credential_risk_mitigations": [
+      "SOLANA_PRIVATE_KEY must be a fresh disposable controller -- never a vault authority key",
+      "On-chain program rejects authority operations from non-authority signers",
+      "Controller wallets hold ~0.01 SOL dust only",
+      "Vault authority can revoke any controller in one transaction"
+    ]
+  },
+  "privilege_levels": {
+    "read": [
+      "TORCH_LIST_TOKENS", "TORCH_GET_TOKEN",
+      "TORCH_GET_LENDING_INFO", "TORCH_GET_LOAN", "TORCH_GET_ALL_LOAN_POSITIONS",
+      "TORCH_GET_VAULT", "TORCH_GET_VAULT_FOR_WALLET",
+      "TORCH_SCAN_LENDING_MARKETS", "TORCH_CHECK_LOAN_HEALTH"
+    ],
+    "controller": [
+      "TORCH_LIQUIDATE", "TORCH_CONFIRM"
+    ]
   },
   "tags": [
-    "solana",
-    "defi",
-    "liquidation",
-    "liquidation-bot",
-    "liquidation-keeper",
-    "collateral-lending",
-    "vault-custody",
-    "ai-agents",
-    "agent-wallet",
-    "agent-safety",
-    "treasury-lending",
-    "bonding-curve",
-    "fair-launch",
-    "token-2022",
-    "raydium",
-    "community-treasury",
-    "protocol-rewards",
-    "solana-agent-kit",
-    "escrow",
-    "anchor",
-    "pda",
-    "on-chain",
-    "autonomous-agent",
-    "keeper-bot",
-    "torch-market"
+    "solana", "defi", "liquidation", "liquidation-bot", "liquidation-keeper",
+    "collateral-lending", "vault-custody", "ai-agents", "agent-wallet",
+    "agent-safety", "treasury-lending", "bonding-curve", "fair-launch",
+    "token-2022", "raydium", "community-treasury", "protocol-rewards",
+    "solana-agent-kit", "escrow", "anchor", "pda", "on-chain",
+    "autonomous-agent", "keeper-bot", "torch-market",
+    "versioned-transactions", "address-lookup-tables"
   ],
   "verification": {
     "said": {

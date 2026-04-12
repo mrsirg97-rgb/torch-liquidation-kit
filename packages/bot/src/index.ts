@@ -85,7 +85,7 @@ const scanAndLiquidate = async (
           'buildLiquidateTransaction',
         )
 
-        transaction.sign(agentKeypair)
+        transaction.sign([agentKeypair])
         const signature = await connection.sendRawTransaction(transaction.serialize())
         await withTimeout(
           confirmTransaction(connection, signature, agentKeypair.publicKey.toBase58()),

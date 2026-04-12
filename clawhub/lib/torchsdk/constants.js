@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.TOKEN_MULTIPLIER = exports.LAMPORTS_PER_SOL = exports.BLACKLISTED_MINTS = exports.LEGACY_MINTS = exports.TOKEN_DECIMALS = exports.TOTAL_SUPPLY = exports.TREASURY_LOCK_SEED = exports.VAULT_WALLET_LINK_SEED = exports.TORCH_VAULT_SEED = exports.COLLATERAL_VAULT_SEED = exports.LOAN_SEED = exports.STAR_RECORD_SEED = exports.USER_STATS_SEED = exports.PROTOCOL_TREASURY_SEED = exports.VOTE_SEED = exports.USER_POSITION_SEED = exports.TREASURY_SEED = exports.BONDING_CURVE_SEED = exports.GLOBAL_CONFIG_SEED = exports.TOKEN_2022_PROGRAM_ID = exports.MEMO_PROGRAM_ID = exports.RAYDIUM_FEE_RECEIVER = exports.getRaydiumFeeReceiver = exports.RAYDIUM_AMM_CONFIG = exports.getRaydiumAmmConfig = exports.WSOL_MINT = exports.RAYDIUM_CPMM_PROGRAM = exports.getRaydiumCpmmProgram = exports.PROGRAM_ID = void 0;
+exports.TOKEN_MULTIPLIER = exports.LAMPORTS_PER_SOL = exports.BLACKLISTED_MINTS = exports.LEGACY_MINTS = exports.TOKEN_DECIMALS = exports.TOTAL_SUPPLY = exports.SHORT_CONFIG_SEED = exports.SHORT_SEED = exports.TREASURY_LOCK_SEED = exports.VAULT_WALLET_LINK_SEED = exports.TORCH_VAULT_SEED = exports.COLLATERAL_VAULT_SEED = exports.LOAN_SEED = exports.STAR_RECORD_SEED = exports.USER_STATS_SEED = exports.PROTOCOL_TREASURY_SEED = exports.VOTE_SEED = exports.USER_POSITION_SEED = exports.TREASURY_SEED = exports.BONDING_CURVE_SEED = exports.GLOBAL_CONFIG_SEED = exports.TOKEN_2022_PROGRAM_ID = exports.MEMO_PROGRAM_ID = exports.getRaydiumFeeReceiver = exports.getRaydiumAmmConfig = exports.WSOL_MINT = exports.getRaydiumCpmmProgram = exports.PROGRAM_ID = void 0;
 const web3_js_1 = require("@solana/web3.js");
 // Program ID - Mainnet/Devnet (deployed program)
 exports.PROGRAM_ID = new web3_js_1.PublicKey('8hbUkonssSEEtkqzwM7ZcZrD9evacM92TcWSooVF4BeT');
@@ -14,8 +14,6 @@ const getRaydiumCpmmProgram = () => new web3_js_1.PublicKey(isDevnet()
     ? 'CPMDWBwJDtYax9qW7AyRuVC19Cc4L4Vcy4n2BHAbHkCW'
     : 'CPMMoo8L3F4NbTegBCKVNunggL7H1ZpdTHKxQB5qKP1C');
 exports.getRaydiumCpmmProgram = getRaydiumCpmmProgram;
-/** @deprecated Use getRaydiumCpmmProgram() for dynamic network support */
-exports.RAYDIUM_CPMM_PROGRAM = (0, exports.getRaydiumCpmmProgram)();
 // WSOL Mint (same on all networks)
 exports.WSOL_MINT = new web3_js_1.PublicKey('So11111111111111111111111111111111111111112');
 // Raydium AMM Config (different on mainnet vs devnet)
@@ -23,15 +21,11 @@ const getRaydiumAmmConfig = () => new web3_js_1.PublicKey(isDevnet()
     ? '9zSzfkYy6awexsHvmggeH36pfVUdDGyCcwmjT3AQPBj6'
     : 'D4FPEruKEHrG5TenZ2mpDGEfu1iUvTiqBxvpU8HLBvC2');
 exports.getRaydiumAmmConfig = getRaydiumAmmConfig;
-/** @deprecated Use getRaydiumAmmConfig() for dynamic network support */
-exports.RAYDIUM_AMM_CONFIG = (0, exports.getRaydiumAmmConfig)();
 // Raydium Fee Receiver (different on mainnet vs devnet)
 const getRaydiumFeeReceiver = () => new web3_js_1.PublicKey(isDevnet()
     ? 'G11FKBRaAkHAKuLCgLM6K6NUc9rTjPAznRCjZifrTQe2'
     : 'DNXgeM9EiiaAbaWvwjHj9fQQLAX5ZsfHyvmYUNRAdNC8');
 exports.getRaydiumFeeReceiver = getRaydiumFeeReceiver;
-/** @deprecated Use getRaydiumFeeReceiver() for dynamic network support */
-exports.RAYDIUM_FEE_RECEIVER = (0, exports.getRaydiumFeeReceiver)();
 // SPL Memo Program
 exports.MEMO_PROGRAM_ID = new web3_js_1.PublicKey('MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr');
 // Token-2022 Program (for Token Extensions)
@@ -51,6 +45,8 @@ exports.COLLATERAL_VAULT_SEED = 'collateral_vault';
 exports.TORCH_VAULT_SEED = 'torch_vault'; // V2.0: Vault PDA
 exports.VAULT_WALLET_LINK_SEED = 'vault_wallet'; // V2.0: Wallet link PDA
 exports.TREASURY_LOCK_SEED = 'treasury_lock'; // V27: Treasury lock PDA
+exports.SHORT_SEED = 'short'; // V5: Short position PDA
+exports.SHORT_CONFIG_SEED = 'short_config'; // V5: Short config PDA
 // Token constants (must match the Rust program)
 exports.TOTAL_SUPPLY = BigInt('1000000000000000'); // 1B with 6 decimals
 exports.TOKEN_DECIMALS = 6;
@@ -94,6 +90,13 @@ exports.LEGACY_MINTS = [
 exports.BLACKLISTED_MINTS = [
     '22fRDzkMUp8LW7RhPGa17FxifJJr6hR4PqyREAR6jitm',
     'DFM5jCjtnEaHnBzfMExiT4rUGnAj7t7kvxci8BgA64tm',
+    // Irys data loss — bundle items never settled to Arweave L1 (Irys gateway shutdown Mar 2026)
+    '6Cc6izuk7816mV97fi9qDcbnLiBEnkFRho5Nnpcqbrtm',
+    '4y2vpd8J8o4bEneohAn6LjwH72BiCgym3c6hYYLamatm',
+    '2zKJuYvB9XJrW16xJgE2SNyECYWFpfEh3JYQU2npcZtm',
+    'DzS7tdbSXET5pFtyqTXCM7JED7JegHvTeuVeJxm56Epy',
+    '5YJdBkWu8wRG2zmaCTRZRBsCq5mcAhaac9ywsbNZtkpy',
+    '8RBSyx31YkBvxGLx6Dd1um5RUgkaVHuuA8dfiKRh6Cpy',
 ];
 // Formatting helpers
 exports.LAMPORTS_PER_SOL = 1000000000;

@@ -54,7 +54,7 @@ const scanAndLiquidate = async (connection, log, vaultCreator, agentKeypair) => 
                     borrower: position.borrower,
                     vault: vaultCreator,
                 }), 'buildLiquidateTransaction');
-                transaction.sign(agentKeypair);
+                transaction.sign([agentKeypair]);
                 const signature = await connection.sendRawTransaction(transaction.serialize());
                 await (0, utils_1.withTimeout)((0, torchsdk_1.confirmTransaction)(connection, signature, agentKeypair.publicKey.toBase58()), 'confirmTransaction');
                 log('info', `LIQUIDATED | ${token.symbol} | borrower=${position.borrower.slice(0, 8)}... | ` +

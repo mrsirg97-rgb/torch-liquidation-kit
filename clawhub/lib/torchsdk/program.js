@@ -3,7 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getRaydiumMigrationAccounts = exports.getRaydiumObservationPda = exports.getRaydiumVaultPda = exports.getRaydiumLpMintPda = exports.getRaydiumPoolStatePda = exports.getRaydiumAuthorityPda = exports.orderTokensForRaydium = exports.calculateBondingProgress = exports.calculatePrice = exports.calculateSolOut = exports.calculateTokensOut = exports.getProgram = exports.getTreasuryLockTokenAccount = exports.getTreasuryLockPda = exports.getVaultWalletLinkPda = exports.getTorchVaultPda = exports.getCollateralVaultPda = exports.getLoanPositionPda = exports.getStarRecordPda = exports.getUserStatsPda = exports.getProtocolTreasuryPda = exports.getTokenTreasuryPda = exports.getVoteRecordPda = exports.getUserPositionPda = exports.getTreasuryTokenAccount = exports.getBondingCurvePda = exports.getGlobalConfigPda = exports.decodeString = exports.PROGRAM_ID = void 0;
+exports.getRaydiumMigrationAccounts = exports.getRaydiumObservationPda = exports.getRaydiumVaultPda = exports.getRaydiumLpMintPda = exports.getRaydiumPoolStatePda = exports.getRaydiumAuthorityPda = exports.orderTokensForRaydium = exports.calculateBondingProgress = exports.calculatePrice = exports.calculateSolOut = exports.calculateTokensOut = exports.getProgram = exports.getTreasuryLockTokenAccount = exports.getShortConfigPda = exports.getShortPositionPda = exports.getTreasuryLockPda = exports.getVaultWalletLinkPda = exports.getTorchVaultPda = exports.getCollateralVaultPda = exports.getLoanPositionPda = exports.getStarRecordPda = exports.getUserStatsPda = exports.getProtocolTreasuryPda = exports.getTokenTreasuryPda = exports.getVoteRecordPda = exports.getUserPositionPda = exports.getTreasuryTokenAccount = exports.getBondingCurvePda = exports.getGlobalConfigPda = exports.decodeString = exports.PROGRAM_ID = void 0;
 const anchor_1 = require("@coral-xyz/anchor");
 const web3_js_1 = require("@solana/web3.js");
 const constants_1 = require("./constants");
@@ -82,6 +82,16 @@ const getTreasuryLockPda = (mint) => {
     return web3_js_1.PublicKey.findProgramAddressSync([Buffer.from(constants_1.TREASURY_LOCK_SEED), mint.toBuffer()], constants_1.PROGRAM_ID);
 };
 exports.getTreasuryLockPda = getTreasuryLockPda;
+// V5: Short position PDA (per user-token)
+const getShortPositionPda = (mint, shorter) => {
+    return web3_js_1.PublicKey.findProgramAddressSync([Buffer.from(constants_1.SHORT_SEED), mint.toBuffer(), shorter.toBuffer()], constants_1.PROGRAM_ID);
+};
+exports.getShortPositionPda = getShortPositionPda;
+// V5: Short config PDA (per token)
+const getShortConfigPda = (mint) => {
+    return web3_js_1.PublicKey.findProgramAddressSync([Buffer.from(constants_1.SHORT_CONFIG_SEED), mint.toBuffer()], constants_1.PROGRAM_ID);
+};
+exports.getShortConfigPda = getShortConfigPda;
 // V27: Treasury Lock's Token-2022 ATA
 const getTreasuryLockTokenAccount = (mint, treasuryLock) => {
     return (0, spl_token_1.getAssociatedTokenAddressSync)(mint, treasuryLock, true, // allowOwnerOffCurve (PDA)
@@ -93,16 +103,16 @@ const getProgram = (provider) => {
     return new anchor_1.Program(torch_market_json_1.default, provider);
 };
 exports.getProgram = getProgram;
-// [V25] Flat treasury SOL rate: 20% → 5% across all tiers (reverted from V24 tiered fees)
-const TREASURY_SOL_MAX_BPS = 2000; // 20% at start
-const TREASURY_SOL_MIN_BPS = 500; // 5% at completion
+// [V36] Treasury SOL rate: 17.5% → 2.5% (was 15%→2.5% — increased to deepen treasury after vote vault removal)
+const TREASURY_SOL_MAX_BPS = 1750; // 17.5% at start
+const TREASURY_SOL_MIN_BPS = 250; // 2.5% at completion
 // [V34] Creator SOL share: 0.2% → 1% during bonding (carved from treasury rate)
 const CREATOR_SOL_MIN_BPS = 20; // 0.2% at start
 const CREATOR_SOL_MAX_BPS = 100; // 1% at completion
 // Calculate tokens out for a given SOL amount (V2.3: dynamic treasury rate, V34: creator share)
 const calculateTokensOut = (solAmount, virtualSolReserves, virtualTokenReserves, realSolReserves = BigInt(0), // V2.3: needed for dynamic rate calculation
-protocolFeeBps = 100, // 1% protocol fee (90% protocol treasury, 10% dev)
-treasuryFeeBps = 100, // 1% treasury fee
+protocolFeeBps = 50, // [V4.0] 0.5% protocol fee (90% protocol treasury, 10% dev)
+treasuryFeeBps = 0, // [V10] 0% token treasury fee (removed — treasury funded by dynamic SOL rate + transfer fees)
 bondingTarget = BigInt('200000000000')) => {
     // Calculate protocol fee (1%)
     const protocolFee = (solAmount * BigInt(protocolFeeBps)) / BigInt(10000);
@@ -128,14 +138,11 @@ bondingTarget = BigInt('200000000000')) => {
     const solToTreasury = treasuryFee + solToTreasurySplit;
     // Calculate tokens using constant product formula (based on SOL going to curve)
     const tokensOut = (virtualTokenReserves * solToCurve) / (virtualSolReserves + solToCurve);
-    // Split tokens: 90% to user, 10% to community treasury
-    // No permanent burn during bonding - community votes on treasury tokens at migration
-    const tokensToUser = (tokensOut * BigInt(9000)) / BigInt(10000);
-    const tokensToCommunity = tokensOut - tokensToUser;
+    // [V36] 100% of tokens go to buyer (vote vault removed)
+    const tokensToUser = tokensOut;
     return {
         tokensOut,
         tokensToUser,
-        tokensToCommunity,
         protocolFee,
         treasuryFee,
         solToCurve,

@@ -1,4 +1,3 @@
-"use strict";
 /**
  * Ephemeral Agent Keypair
  *
@@ -13,9 +12,15 @@
  *   3. SDK uses agent.sign(tx) for all vault operations
  *   4. On shutdown, keys are GC'd. Authority unlinks the wallet.
  */
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.createEphemeralAgent = void 0;
-const web3_js_1 = require("@solana/web3.js");
+import { Keypair, Transaction, VersionedTransaction } from '@solana/web3.js';
+export interface EphemeralAgent {
+    /** Base58 public key — pass this to linkWallet */
+    publicKey: string;
+    /** Raw keypair for advanced usage */
+    keypair: Keypair;
+    /** Sign a transaction with the ephemeral key */
+    sign(tx: Transaction | VersionedTransaction): Transaction | VersionedTransaction;
+}
 /**
  * Create an ephemeral agent keypair.
  *
@@ -24,21 +29,5 @@ const web3_js_1 = require("@solana/web3.js");
  *
  * @returns EphemeralAgent with publicKey, sign function, and raw keypair
  */
-const createEphemeralAgent = () => {
-    const keypair = web3_js_1.Keypair.generate();
-    return {
-        publicKey: keypair.publicKey.toBase58(),
-        keypair,
-        sign: (tx) => {
-            if (tx instanceof web3_js_1.VersionedTransaction) {
-                tx.sign([keypair]);
-            }
-            else {
-                tx.partialSign(keypair);
-            }
-            return tx;
-        },
-    };
-};
-exports.createEphemeralAgent = createEphemeralAgent;
-//# sourceMappingURL=ephemeral.js.map
+export declare const createEphemeralAgent: () => EphemeralAgent;
+//# sourceMappingURL=ephemeral.d.ts.map

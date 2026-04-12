@@ -11,7 +11,7 @@
  *   const tx = await buildBuyTransaction(connection, { mint, buyer, amount_sol: 100_000_000 });
  */
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.LEGACY_MINTS = exports.TOTAL_SUPPLY = exports.TOKEN_MULTIPLIER = exports.LAMPORTS_PER_SOL = exports.PROGRAM_ID = exports.confirmTransaction = exports.verifySaid = exports.createEphemeralAgent = exports.buildSwapFeesToSolTransaction = exports.buildHarvestFeesTransaction = exports.buildVaultSwapTransaction = exports.buildWithdrawTokensTransaction = exports.buildTransferAuthorityTransaction = exports.buildUnlinkWalletTransaction = exports.buildLinkWalletTransaction = exports.buildWithdrawVaultTransaction = exports.buildDepositVaultTransaction = exports.buildCreateVaultTransaction = exports.buildClaimProtocolRewardsTransaction = exports.buildLiquidateTransaction = exports.buildRepayTransaction = exports.buildBorrowTransaction = exports.buildMigrateTransaction = exports.buildStarTransaction = exports.buildCreateTokenTransaction = exports.buildSellTransaction = exports.buildDirectBuyTransaction = exports.buildBuyTransaction = exports.getSellQuote = exports.getBuyQuote = exports.getVaultWalletLink = exports.getVaultForWallet = exports.getVault = exports.getAllLoanPositions = exports.getLoanPosition = exports.getLendingInfo = exports.getMessages = exports.getHolders = exports.getTokenMetadata = exports.getToken = exports.getTokens = void 0;
+exports.LEGACY_MINTS = exports.TOTAL_SUPPLY = exports.TOKEN_MULTIPLIER = exports.LAMPORTS_PER_SOL = exports.PROGRAM_ID = exports.confirmTransaction = exports.verifySaid = exports.createEphemeralAgent = exports.buildEnableShortSellingTransaction = exports.buildLiquidateShortTransaction = exports.buildCloseShortTransaction = exports.buildOpenShortTransaction = exports.buildSwapFeesToSolTransaction = exports.buildHarvestFeesTransaction = exports.buildWithdrawTokensTransaction = exports.buildTransferAuthorityTransaction = exports.buildUnlinkWalletTransaction = exports.buildLinkWalletTransaction = exports.buildWithdrawVaultTransaction = exports.buildDepositVaultTransaction = exports.buildCreateVaultTransaction = exports.buildReclaimFailedTokenTransaction = exports.buildClaimProtocolRewardsTransaction = exports.buildLiquidateTransaction = exports.buildRepayTransaction = exports.buildBorrowTransaction = exports.buildMigrateTransaction = exports.buildStarTransaction = exports.buildCreateTokenTransaction = exports.buildSellTransaction = exports.sendCreateToken = exports.sendDirectBuy = exports.sendBuy = exports.buildDirectBuyTransaction = exports.buildBuyTransaction = exports.getBorrowQuote = exports.getSellQuote = exports.getBuyQuote = exports.getVaultWalletLink = exports.getVaultForWallet = exports.getVault = exports.getShortPosition = exports.getAllLoanPositions = exports.getLoanPosition = exports.getLendingInfo = exports.getMessages = exports.getHolders = exports.getTokenMetadata = exports.getToken = exports.getTokens = void 0;
 // Token data
 var tokens_1 = require("./tokens");
 Object.defineProperty(exports, "getTokens", { enumerable: true, get: function () { return tokens_1.getTokens; } });
@@ -22,6 +22,7 @@ Object.defineProperty(exports, "getMessages", { enumerable: true, get: function 
 Object.defineProperty(exports, "getLendingInfo", { enumerable: true, get: function () { return tokens_1.getLendingInfo; } });
 Object.defineProperty(exports, "getLoanPosition", { enumerable: true, get: function () { return tokens_1.getLoanPosition; } });
 Object.defineProperty(exports, "getAllLoanPositions", { enumerable: true, get: function () { return tokens_1.getAllLoanPositions; } });
+Object.defineProperty(exports, "getShortPosition", { enumerable: true, get: function () { return tokens_1.getShortPosition; } });
 Object.defineProperty(exports, "getVault", { enumerable: true, get: function () { return tokens_1.getVault; } });
 Object.defineProperty(exports, "getVaultForWallet", { enumerable: true, get: function () { return tokens_1.getVaultForWallet; } });
 Object.defineProperty(exports, "getVaultWalletLink", { enumerable: true, get: function () { return tokens_1.getVaultWalletLink; } });
@@ -29,10 +30,14 @@ Object.defineProperty(exports, "getVaultWalletLink", { enumerable: true, get: fu
 var quotes_1 = require("./quotes");
 Object.defineProperty(exports, "getBuyQuote", { enumerable: true, get: function () { return quotes_1.getBuyQuote; } });
 Object.defineProperty(exports, "getSellQuote", { enumerable: true, get: function () { return quotes_1.getSellQuote; } });
+Object.defineProperty(exports, "getBorrowQuote", { enumerable: true, get: function () { return quotes_1.getBorrowQuote; } });
 // Transaction builders
 var transactions_1 = require("./transactions");
 Object.defineProperty(exports, "buildBuyTransaction", { enumerable: true, get: function () { return transactions_1.buildBuyTransaction; } });
 Object.defineProperty(exports, "buildDirectBuyTransaction", { enumerable: true, get: function () { return transactions_1.buildDirectBuyTransaction; } });
+Object.defineProperty(exports, "sendBuy", { enumerable: true, get: function () { return transactions_1.sendBuy; } });
+Object.defineProperty(exports, "sendDirectBuy", { enumerable: true, get: function () { return transactions_1.sendDirectBuy; } });
+Object.defineProperty(exports, "sendCreateToken", { enumerable: true, get: function () { return transactions_1.sendCreateToken; } });
 Object.defineProperty(exports, "buildSellTransaction", { enumerable: true, get: function () { return transactions_1.buildSellTransaction; } });
 Object.defineProperty(exports, "buildCreateTokenTransaction", { enumerable: true, get: function () { return transactions_1.buildCreateTokenTransaction; } });
 Object.defineProperty(exports, "buildStarTransaction", { enumerable: true, get: function () { return transactions_1.buildStarTransaction; } });
@@ -41,6 +46,7 @@ Object.defineProperty(exports, "buildBorrowTransaction", { enumerable: true, get
 Object.defineProperty(exports, "buildRepayTransaction", { enumerable: true, get: function () { return transactions_1.buildRepayTransaction; } });
 Object.defineProperty(exports, "buildLiquidateTransaction", { enumerable: true, get: function () { return transactions_1.buildLiquidateTransaction; } });
 Object.defineProperty(exports, "buildClaimProtocolRewardsTransaction", { enumerable: true, get: function () { return transactions_1.buildClaimProtocolRewardsTransaction; } });
+Object.defineProperty(exports, "buildReclaimFailedTokenTransaction", { enumerable: true, get: function () { return transactions_1.buildReclaimFailedTokenTransaction; } });
 Object.defineProperty(exports, "buildCreateVaultTransaction", { enumerable: true, get: function () { return transactions_1.buildCreateVaultTransaction; } });
 Object.defineProperty(exports, "buildDepositVaultTransaction", { enumerable: true, get: function () { return transactions_1.buildDepositVaultTransaction; } });
 Object.defineProperty(exports, "buildWithdrawVaultTransaction", { enumerable: true, get: function () { return transactions_1.buildWithdrawVaultTransaction; } });
@@ -48,9 +54,12 @@ Object.defineProperty(exports, "buildLinkWalletTransaction", { enumerable: true,
 Object.defineProperty(exports, "buildUnlinkWalletTransaction", { enumerable: true, get: function () { return transactions_1.buildUnlinkWalletTransaction; } });
 Object.defineProperty(exports, "buildTransferAuthorityTransaction", { enumerable: true, get: function () { return transactions_1.buildTransferAuthorityTransaction; } });
 Object.defineProperty(exports, "buildWithdrawTokensTransaction", { enumerable: true, get: function () { return transactions_1.buildWithdrawTokensTransaction; } });
-Object.defineProperty(exports, "buildVaultSwapTransaction", { enumerable: true, get: function () { return transactions_1.buildVaultSwapTransaction; } });
 Object.defineProperty(exports, "buildHarvestFeesTransaction", { enumerable: true, get: function () { return transactions_1.buildHarvestFeesTransaction; } });
 Object.defineProperty(exports, "buildSwapFeesToSolTransaction", { enumerable: true, get: function () { return transactions_1.buildSwapFeesToSolTransaction; } });
+Object.defineProperty(exports, "buildOpenShortTransaction", { enumerable: true, get: function () { return transactions_1.buildOpenShortTransaction; } });
+Object.defineProperty(exports, "buildCloseShortTransaction", { enumerable: true, get: function () { return transactions_1.buildCloseShortTransaction; } });
+Object.defineProperty(exports, "buildLiquidateShortTransaction", { enumerable: true, get: function () { return transactions_1.buildLiquidateShortTransaction; } });
+Object.defineProperty(exports, "buildEnableShortSellingTransaction", { enumerable: true, get: function () { return transactions_1.buildEnableShortSellingTransaction; } });
 // Ephemeral Agent
 var ephemeral_1 = require("./ephemeral");
 Object.defineProperty(exports, "createEphemeralAgent", { enumerable: true, get: function () { return ephemeral_1.createEphemeralAgent; } });

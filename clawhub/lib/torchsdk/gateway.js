@@ -1,23 +1,28 @@
 "use strict";
 /**
- * Gateway URL utilities for Irys content
- * Use uploader.irys.xyz as fallback when gateway.irys.xyz has issues
+ * Gateway URL utilities for Arweave content
+ * Irys gateway is dead (deprecated Nov 2025) — all reads go through arweave.net
+ * Data uploaded via Irys was settled to Arweave, so same tx IDs work on arweave.net
  */
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.fetchWithFallback = exports.isIrysUrl = exports.irysToUploader = void 0;
+exports.fetchWithFallback = exports.isIrysUrl = exports.irysToUploader = exports.irysToArweave = void 0;
 const IRYS_GATEWAY = 'gateway.irys.xyz';
 const IRYS_UPLOADER = 'uploader.irys.xyz';
+const ARWEAVE_GATEWAY = 'arweave.net';
 /**
- * Convert an Irys gateway URL to uploader URL (fallback)
+ * Convert any Irys URL to arweave.net
  */
-const irysToUploader = (url) => url.replace(IRYS_GATEWAY, IRYS_UPLOADER);
-exports.irysToUploader = irysToUploader;
+const irysToArweave = (url) => url.replace(IRYS_GATEWAY, ARWEAVE_GATEWAY).replace(IRYS_UPLOADER, ARWEAVE_GATEWAY);
+exports.irysToArweave = irysToArweave;
+/** @deprecated Use irysToArweave */
+exports.irysToUploader = exports.irysToArweave;
 /**
- * Check if URL is from Irys gateway
+ * Check if URL is from Irys (dead) gateway or uploader
  */
 const isIrysUrl = (url) => {
     try {
-        return new URL(url).hostname === IRYS_GATEWAY;
+        const host = new URL(url).hostname;
+        return host === IRYS_GATEWAY || host === IRYS_UPLOADER;
     }
     catch {
         return false;
@@ -25,19 +30,16 @@ const isIrysUrl = (url) => {
 };
 exports.isIrysUrl = isIrysUrl;
 /**
- * Fetch with automatic fallback from gateway.irys.xyz to uploader.irys.xyz
+ * Fetch with automatic rewrite from dead Irys domains to arweave.net
  */
 const fetchWithFallback = async (url, options, timeoutMs = 10000) => {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     const opts = { ...options, signal: controller.signal };
     try {
-        // If it's an Irys gateway URL, use uploader directly (gateway has SSL issues)
         if ((0, exports.isIrysUrl)(url)) {
-            const uploaderUrl = (0, exports.irysToUploader)(url);
-            return await fetch(uploaderUrl, opts);
+            return await fetch((0, exports.irysToArweave)(url), opts);
         }
-        // For non-Irys URLs, fetch normally
         return await fetch(url, opts);
     }
     finally {
