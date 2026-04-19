@@ -75,14 +75,11 @@ const confirmTransaction = async (connection, signature, wallet) => {
     const isCreateToken = logs.some((log) => log.includes('Instruction: CreateToken') || log.includes('create_token'));
     const isBuy = logs.some((log) => log.includes('Instruction: Buy') || log.includes('Program log: Buy'));
     const isSell = logs.some((log) => log.includes('Instruction: Sell') || log.includes('Program log: Sell'));
-    const isVote = logs.some((log) => log.includes('Instruction: Vote') || log.includes('Program log: Vote'));
     let event_type = 'unknown';
     if (isCreateToken)
         event_type = 'token_launch';
     else if (isBuy || isSell)
         event_type = 'trade_complete';
-    else if (isVote)
-        event_type = 'governance_vote';
     return { confirmed: true, event_type };
 };
 exports.confirmTransaction = confirmTransaction;

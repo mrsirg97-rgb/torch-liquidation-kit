@@ -1,6 +1,6 @@
 ---
 name: torch-liquidation-bot
-version: "10.0.0"
+version: "10.5.2"
 description: Autonomous vault-based liquidation keeper for Torch Market lending on Solana. Scans all migrated tokens for underwater loan positions using the SDK's bulk loan scanner (getAllLoanPositions), builds and executes liquidation transactions through a Torch Vault, and collects a 10% collateral bonus.
 license: MIT
 disable-model-invocation: true
@@ -12,6 +12,16 @@ requires:
       required: true
     - name: SOLANA_PRIVATE_KEY
       required: false
+    - name: SCAN_INTERVAL_MS
+      required: false
+    - name: SCAN_LIMIT
+      required: false
+    - name: MIN_AGENT_BALANCE_SOL
+      required: false
+    - name: LOG_LEVEL
+      required: false
+    - name: LOG_FORMAT
+      required: false
 metadata:
   clawdbot:
     requires:
@@ -21,6 +31,16 @@ metadata:
         - name: VAULT_CREATOR
           required: true
         - name: SOLANA_PRIVATE_KEY
+          required: false
+        - name: SCAN_INTERVAL_MS
+          required: false
+        - name: SCAN_LIMIT
+          required: false
+        - name: MIN_AGENT_BALANCE_SOL
+          required: false
+        - name: LOG_LEVEL
+          required: false
+        - name: LOG_FORMAT
           required: false
     primaryEnv: SOLANA_RPC_URL
   openclaw:
@@ -32,15 +52,25 @@ metadata:
           required: true
         - name: SOLANA_PRIVATE_KEY
           required: false
+        - name: SCAN_INTERVAL_MS
+          required: false
+        - name: SCAN_LIMIT
+          required: false
+        - name: MIN_AGENT_BALANCE_SOL
+          required: false
+        - name: LOG_LEVEL
+          required: false
+        - name: LOG_FORMAT
+          required: false
     primaryEnv: SOLANA_RPC_URL
     install:
       - id: npm-torch-liquidation-bot
         kind: npm
-        package: torch-liquidation-bot@^10.0.0
+        package: torch-liquidation-bot@^10.5.2
         flags: []
         label: "Install Torch Liquidation Bot (npm, optional -- SDK is bundled in lib/torchsdk/ and bot source is bundled under lib/kit on clawhub)"
   author: torch-market
-  version: "10.0.0"
+  version: "10.5.2"
   clawhub: https://clawhub.ai/mrsirg97-rgb/torch-liquidation-bot
   kit-source: https://github.com/mrsirg97-rgb/torch-liquidation-kit
   sdk-source: https://github.com/mrsirg97-rgb/torchsdk
@@ -204,7 +234,10 @@ On first run, the bot prints the agent keypair and instructions to link it. Link
 | `VAULT_CREATOR` | **Yes** | -- | Vault creator pubkey |
 | `SOLANA_PRIVATE_KEY` | No | -- | Disposable controller keypair (base58 or JSON byte array). If omitted, generates fresh keypair on startup (recommended) |
 | `SCAN_INTERVAL_MS` | No | `30000` | Milliseconds between scan cycles (min 5000) |
+| `SCAN_LIMIT` | No | `50` | Max tokens scanned per cycle (`0` = unlimited) |
+| `MIN_AGENT_BALANCE_SOL` | No | `0.01` | Pause liquidations when agent gas balance drops below this |
 | `LOG_LEVEL` | No | `info` | `debug`, `info`, `warn`, `error` |
+| `LOG_FORMAT` | No | `text` | `text` (human-readable) or `json` (structured, one record per line) |
 
 ## SDK Functions Used
 
@@ -274,7 +307,7 @@ If not provided: the bot generates a fresh keypair on startup (recommended).
 | Service | Purpose | When Called |
 |---------|---------|------------|
 | **CoinGecko** (`api.coingecko.com`) | SOL/USD price for display | Token queries via `getTokens()` |
-| **Irys Gateway** (`gateway.irys.xyz`) | Token metadata fallback | `getTokens()` when on-chain metadata URI points to Irys |
+| Creator-controlled metadata URI (typically `arweave.net`) | Token metadata JSON | `getTokens()` / `getToken()` — 10s fetch timeout, failure is non-fatal |
 
 No credentials sent. All requests are read-only GET. No private key material is ever transmitted.
 

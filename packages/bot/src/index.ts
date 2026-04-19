@@ -1,22 +1,16 @@
 #!/usr/bin/env node
 /**
- * torch-liquidation-bot — vault-based liquidation bot.
+ * torch-liquidation-bot — vault-based liquidation keeper.
  *
- * generates an agent keypair in-process (or uses SOLANA_PRIVATE_KEY if provided).
- * all operations route through a torch vault identified by VAULT_CREATOR.
- *
+ * generates an agent keypair in-process (or loads SOLANA_PRIVATE_KEY).
+ * all value flows through a Torch Vault identified by VAULT_CREATOR.
+ * the agent key is a stateless signer holding only gas SOL.
  * usage:
- *   VAULT_CREATOR=<pubkey> SOLANA_RPC_URL=<rpc> npx tsx src/index.ts
- *
- * env:
- *   SOLANA_RPC_URL    — solana RPC endpoint (required, fallback: RPC_URL)
- *   VAULT_CREATOR     — vault creator pubkey (required)
- *   SOLANA_PRIVATE_KEY — disposable controller keypair, base58 (optional)
- *   SCAN_INTERVAL_MS  — ms between scan cycles (default 30000, min 5000)
- *   LOG_LEVEL         — debug | info | warn | error (default info)
+ *   VAULT_CREATOR=<pubkey> SOLANA_RPC_URL=<rpc> npx torch-liquidation-bot
+ * See config.ts for the full env var list.
  */
-
 import { Connection, Keypair } from '@solana/web3.js'
+import bs58 from 'bs58'
 import {
   getTokens,
   getAllLoanPositions,
@@ -26,59 +20,93 @@ import {
   confirmTransaction,
   type LoanPositionWithKey,
 } from 'torchsdk'
+
 import { loadConfig } from './config'
-import { sol, bpsToPercent, createLogger, decodeBase58, withTimeout } from './utils'
+import { sol, bpsToPercent, createLogger, withTimeout, withRetry } from './utils'
+import type { BotStats, Logger, ScanContext } from './types'
 
-// ---------------------------------------------------------------------------
-// scan & liquidate
-// ---------------------------------------------------------------------------
+const scanAndLiquidate = async ({
+  connection,
+  log,
+  vaultCreator,
+  agentKeypair,
+  agentPk,
+  scanLimit,
+  minBalance,
+  stats,
+  isShutdownRequested,
+}: ScanContext): Promise<void> => {
+  // pre-flight balance check — skip cycle if agent can't pay gas
+  const balance = await withRetry(
+    () => withTimeout(connection.getBalance(agentKeypair.publicKey), 'getBalance'),
+    'getBalance',
+    3,
+    () => stats.rpcRetries++,
+  )
+  if (balance < minBalance) {
+    log('error', `agent balance too low — pausing cycle`, {
+      balance_sol: sol(balance),
+      min_sol: sol(minBalance),
+    })
+    return
+  }
 
-const scanAndLiquidate = async (
-  connection: Connection,
-  log: ReturnType<typeof createLogger>,
-  vaultCreator: string,
-  agentKeypair: Keypair,
-) => {
-  const { tokens } = await withTimeout(
-    getTokens(connection, { status: 'migrated', sort: 'volume', limit: 50 }),
+  const { tokens } = await withRetry(
+    () =>
+      withTimeout(
+        getTokens(connection, {
+          status: 'migrated',
+          sort: 'volume',
+          limit: scanLimit > 0 ? scanLimit : 10_000,
+        }),
+        'getTokens',
+      ),
     'getTokens',
+    3,
+    () => stats.rpcRetries++,
   )
 
   log('debug', `discovered ${tokens.length} migrated tokens`)
-
   for (const token of tokens) {
+    // bail between tokens so SIGTERM doesn't stall on a long scan of many tokens
+    if (isShutdownRequested()) return
+
     let positions: LoanPositionWithKey[]
     try {
-      const result = await withTimeout(getAllLoanPositions(connection, token.mint), 'getAllLoanPositions')
+      const result = await withRetry(
+        () => withTimeout(getAllLoanPositions(connection, token.mint), 'getAllLoanPositions'),
+        'getAllLoanPositions',
+        3,
+        () => stats.rpcRetries++,
+      )
       positions = result.positions
     } catch {
-      continue // lending not enabled for this token
+      continue // lending not enabled for this token, or persistent RPC failure
     }
 
-    if (positions.length === 0) continue
+    if (positions.length === 0) {
+      continue
+    }
 
-    log(
-      'debug',
-      `${token.symbol} — ${positions.length} active loans`,
-    )
-
-    // positions are pre-sorted: liquidatable → at_risk → healthy
+    log('debug', `${token.symbol} — ${positions.length} active loans`)
+    // positions are pre-sorted: liquidatable -> at_risk -> healthy
     for (const position of positions) {
-      if (position.health !== 'liquidatable') break // sorted, so no more liquidatable after this
+      if (position.health !== 'liquidatable') {
+        break
+      }
 
-      log(
-        'info',
-        `LIQUIDATABLE | ${token.symbol} | borrower=${position.borrower.slice(0, 8)}... | ` +
-          `LTV=${position.current_ltv_bps != null ? bpsToPercent(position.current_ltv_bps) : '?'} | ` +
-          `owed=${sol(position.total_owed)} SOL`,
-      )
+      log('info', `LIQUIDATABLE`, {
+        token: token.symbol,
+        borrower: position.borrower.slice(0, 8) + '...',
+        ltv: position.current_ltv_bps != null ? bpsToPercent(position.current_ltv_bps) : 'unknown',
+        owed_sol: sol(position.total_owed),
+      })
 
-      // build and execute liquidation through the vault
       try {
         const { transaction, message } = await withTimeout(
           buildLiquidateTransaction(connection, {
             mint: token.mint,
-            liquidator: agentKeypair.publicKey.toBase58(),
+            liquidator: agentPk,
             borrower: position.borrower,
             vault: vaultCreator,
           }),
@@ -87,71 +115,94 @@ const scanAndLiquidate = async (
 
         transaction.sign([agentKeypair])
         const signature = await connection.sendRawTransaction(transaction.serialize())
-        await withTimeout(
-          confirmTransaction(connection, signature, agentKeypair.publicKey.toBase58()),
-          'confirmTransaction',
-        )
-
-        log(
-          'info',
-          `LIQUIDATED | ${token.symbol} | borrower=${position.borrower.slice(0, 8)}... | ` +
-            `sig=${signature.slice(0, 16)}... | ${message}`,
-        )
-      } catch (err: any) {
-        log(
-          'warn',
-          `LIQUIDATION FAILED | ${token.symbol} | ${position.borrower.slice(0, 8)}... | ${err.message}`,
-        )
+        await withTimeout(confirmTransaction(connection, signature, agentPk), 'confirmTransaction')
+        stats.liquidations++
+        log('info', `LIQUIDATED`, {
+          token: token.symbol,
+          borrower: position.borrower.slice(0, 8) + '...',
+          sig: signature.slice(0, 16) + '...',
+          message,
+        })
+      } catch (err) {
+        stats.failures++
+        const msg = err instanceof Error ? err.message : String(err)
+        stats.lastError = msg
+        log('warn', `LIQUIDATION FAILED`, {
+          token: token.symbol,
+          borrower: position.borrower.slice(0, 8) + '...',
+          error: msg,
+        })
       }
     }
   }
 }
 
-// ---------------------------------------------------------------------------
-// main — vault-routed liquidation loop
-// ---------------------------------------------------------------------------
+const loadAgentKeypair = (privateKey: string | null, log: Logger): Keypair => {
+  if (!privateKey) {
+    const kp = Keypair.generate()
+    log('info', 'generated fresh agent keypair')
+    return kp
+  }
 
+  try {
+    const parsed = JSON.parse(privateKey)
+    if (Array.isArray(parsed)) {
+      const kp = Keypair.fromSecretKey(Uint8Array.from(parsed))
+      log('info', 'loaded keypair from SOLANA_PRIVATE_KEY (JSON byte array)')
+      return kp
+    }
+    throw new Error('SOLANA_PRIVATE_KEY JSON must be a byte array')
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e)
+    if (msg.includes('byte array')) throw e
+  }
+
+  const kp = Keypair.fromSecretKey(bs58.decode(privateKey))
+  log('info', 'loaded keypair from SOLANA_PRIVATE_KEY (base58)')
+  return kp
+}
+
+// main — vault-routed liquidation loop with graceful shutdown
 const main = async () => {
   const config = loadConfig()
-  const log = createLogger(config.logLevel)
+  const log = createLogger(config.logLevel, config.logFormat)
   const connection = new Connection(config.rpcUrl, 'confirmed')
-
-  // load or generate agent keypair
-  let agentKeypair: Keypair
-  if (config.privateKey) {
-    try {
-      const parsed = JSON.parse(config.privateKey)
-      if (Array.isArray(parsed)) {
-        agentKeypair = Keypair.fromSecretKey(Uint8Array.from(parsed))
-      } else {
-        throw new Error('SOLANA_PRIVATE_KEY JSON must be a byte array')
-      }
-    } catch (e: any) {
-      if (e.message?.includes('byte array')) throw e
-      // not JSON — try base58
-      agentKeypair = Keypair.fromSecretKey(decodeBase58(config.privateKey))
-    }
-    log('info', 'loaded keypair from SOLANA_PRIVATE_KEY')
-  } else {
-    agentKeypair = Keypair.generate()
-    log('info', 'generated fresh agent keypair')
+  const agentKeypair = loadAgentKeypair(config.privateKey, log)
+  const agentPk = agentKeypair.publicKey.toBase58()
+  const stats: BotStats = {
+    cycles: 0,
+    liquidations: 0,
+    failures: 0,
+    rpcRetries: 0,
+    startedAt: Date.now(),
+    lastError: null,
   }
 
   console.log('=== torch liquidation bot ===')
-  console.log(`agent wallet: ${agentKeypair.publicKey.toBase58()}`)
+  console.log(`agent wallet: ${agentPk}`)
   console.log(`vault creator: ${config.vaultCreator}`)
   console.log(`scan interval: ${config.scanIntervalMs}ms`)
-  console.log()
-
+  console.log(`scan limit: ${config.scanLimit === 0 ? 'unlimited' : config.scanLimit}`)
+  console.log(`min agent balance: ${sol(config.minAgentBalanceLamports)} SOL\n`)
   // verify vault exists
-  const vault = await withTimeout(getVault(connection, config.vaultCreator), 'getVault')
+  const vault = await withRetry(
+    () => withTimeout(getVault(connection, config.vaultCreator), 'getVault'),
+    'getVault',
+    3,
+    () => stats.rpcRetries++,
+  )
   if (!vault) {
     throw new Error(`vault not found for creator ${config.vaultCreator}`)
   }
-  log('info', `vault found — authority=${vault.authority}`)
 
+  log('info', `vault found — authority=${vault.authority}`)
   // verify agent wallet is linked to vault
-  const link = await withTimeout(getVaultForWallet(connection, agentKeypair.publicKey.toBase58()), 'getVaultForWallet')
+  const link = await withRetry(
+    () => withTimeout(getVaultForWallet(connection, agentPk), 'getVaultForWallet'),
+    'getVaultForWallet',
+    3,
+    () => stats.rpcRetries++,
+  )
   if (!link) {
     console.log()
     console.log('--- ACTION REQUIRED ---')
@@ -161,7 +212,7 @@ const main = async () => {
     console.log(`  buildLinkWalletTransaction(connection, {`)
     console.log(`    authority: "<your-authority-pubkey>",`)
     console.log(`    vault_creator: "${config.vaultCreator}",`)
-    console.log(`    wallet_to_link: "${agentKeypair.publicKey.toBase58()}"`)
+    console.log(`    wallet_to_link: "${agentPk}"`)
     console.log(`  })`)
     console.log()
     console.log('then restart the bot.')
@@ -169,24 +220,70 @@ const main = async () => {
     process.exit(1)
   }
 
-  log('info', 'agent wallet linked to vault — starting scan loop')
+  log('info', `agent wallet linked to vault — starting scan loop`)
   log('info', `treasury: ${sol(vault.sol_balance ?? 0)} SOL`)
+  // graceful shutdown on SIGINT / SIGTERM
+  let shutdown = false
+  const requestShutdown = (signal: string) => {
+    if (shutdown) return
+    shutdown = true
+    log('info', `received ${signal} — shutting down after current cycle`)
+  }
+
+  process.on('SIGINT', () => requestShutdown('SIGINT'))
+  process.on('SIGTERM', () => requestShutdown('SIGTERM'))
+  const ctx: ScanContext = {
+    connection,
+    log,
+    vaultCreator: config.vaultCreator,
+    agentKeypair,
+    agentPk,
+    scanLimit: config.scanLimit,
+    minBalance: config.minAgentBalanceLamports,
+    stats,
+    isShutdownRequested: () => shutdown,
+  }
 
   // scan loop
-  while (true) {
+  while (!shutdown) {
     try {
       log('debug', '--- scan cycle start ---')
-      await scanAndLiquidate(connection, log, config.vaultCreator, agentKeypair)
-      log('debug', '--- scan cycle end ---')
-    } catch (err: any) {
-      log('error', `scan cycle error: ${err.message}`)
+      await scanAndLiquidate(ctx)
+      stats.cycles++
+      log('info', `stats`, {
+        cycles: stats.cycles,
+        liquidations: stats.liquidations,
+        failures: stats.failures,
+        rpc_retries: stats.rpcRetries,
+        uptime_sec: Math.floor((Date.now() - stats.startedAt) / 1000),
+      })
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      stats.lastError = msg
+      log('error', `scan cycle error: ${msg}`)
     }
 
-    await new Promise((resolve) => setTimeout(resolve, config.scanIntervalMs))
+    if (shutdown) {
+      break
+    }
+
+    // interruptible sleep so shutdown fires quickly
+    const sleepUntil = Date.now() + config.scanIntervalMs
+    while (!shutdown && Date.now() < sleepUntil) {
+      await new Promise((resolve) => setTimeout(resolve, 500))
+    }
   }
+
+  log('info', 'graceful shutdown complete', {
+    final_cycles: stats.cycles,
+    final_liquidations: stats.liquidations,
+    final_failures: stats.failures,
+  })
+  process.exit(0)
 }
 
 main().catch((err) => {
-  console.error('FATAL:', err.message ?? err)
+  const msg = err instanceof Error ? err.message : String(err)
+  console.error('FATAL:', msg)
   process.exit(1)
 })

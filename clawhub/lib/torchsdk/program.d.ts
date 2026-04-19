@@ -113,7 +113,6 @@ export declare const getGlobalConfigPda: () => [PublicKey, number];
 export declare const getBondingCurvePda: (mint: PublicKey) => [PublicKey, number];
 export declare const getTreasuryTokenAccount: (mint: PublicKey, treasury: PublicKey) => PublicKey;
 export declare const getUserPositionPda: (bondingCurve: PublicKey, user: PublicKey) => [PublicKey, number];
-export declare const getVoteRecordPda: (bondingCurve: PublicKey, voter: PublicKey) => [PublicKey, number];
 export declare const getTokenTreasuryPda: (mint: PublicKey) => [PublicKey, number];
 export declare const getProtocolTreasuryPda: () => [PublicKey, number];
 export declare const getUserStatsPda: (user: PublicKey) => [PublicKey, number];

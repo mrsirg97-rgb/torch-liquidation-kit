@@ -1,9 +1,9 @@
 # Torch SDK Security Audit
 
-**Audit Date:** April 3, 2026
+**Audit Date:** April 19, 2026
 **Auditor:** Claude Opus 4.6 (Anthropic)
-**SDK Version:** 10.2.6
-**On-Chain Program:** `8hbUkonssSEEtkqzwM7ZcZrD9evacM92TcWSooVF4BeT` (V10.2.6)
+**SDK Version:** 10.5.0
+**On-Chain Program:** `8hbUkonssSEEtkqzwM7ZcZrD9evacM92TcWSooVF4BeT` (V10.2.6 — unchanged)
 **Language:** TypeScript
 **Test Result:** 55 passed, 0 failed (Surfpool mainnet fork)
 
@@ -41,7 +41,7 @@ The SDK is **stateless** (no global state, no connection pools), **non-custodial
 | Vault Integration | **PASS** | Correct null/Some handling, wallet link derived from buyer (not vault creator) |
 | Key Safety | **PASS** | No key custody — unsigned transaction pattern throughout |
 | Input Validation | **PASS** | Slippage validated with explicit error, lengths checked, PublicKey constructor validates base58 |
-| External APIs | **PASS** | SAID + CoinGecko + metadata URI — all degrade gracefully, metadata fetch has 10s timeout |
+| External APIs | **PASS** | SAID + CoinGecko + metadata URI — all degrade gracefully; metadata fetch uses direct `fetch()` with 10s AbortController timeout |
 | Dependencies | **MINIMAL** | 4 runtime deps, all standard Solana ecosystem |
 
 ### Finding Summary
@@ -52,7 +52,7 @@ The SDK is **stateless** (no global state, no connection pools), **non-custodial
 | High | 0 |
 | Medium | 0 |
 | Low | 0 (3 resolved in v3.2.4) |
-| Informational | 7 |
+| Informational | 6 (I-2 resolved in v10.2.0) |
 
 ---
 
@@ -70,7 +70,6 @@ The SDK is **stateless** (no global state, no connection pools), **non-custodial
 | `src/transactions.ts` | ~1960 | Transaction builders (buy, sell, vault, lending, star, migrate, reclaim, harvest, swap fees) |
 | `src/quotes.ts` | 102 | Buy/sell quote calculations |
 | `src/said.ts` | 110 | SAID Protocol integration |
-| `src/gateway.ts` | 49 | Irys metadata fetch with fallback + timeout |
 | `src/ephemeral.ts` | 45 | Ephemeral agent (disposable wallet helper) |
 | `src/torch_market.json` | — | Anchor IDL (V4.0.1, 27 instructions) |
 | **Total** | **~4,415** | |
@@ -284,14 +283,14 @@ Used in `getToken()` (tokens.ts:342-349) for SOL/USD conversion. Fails gracefull
 
 ### Metadata URI (Token Creator-Controlled)
 
-`getToken()` fetches the metadata URI stored in the on-chain `BondingCurve.uri` field (tokens.ts:314-328). This URI is **set by the token creator** and could point to any HTTP endpoint.
+`getToken()` fetches the metadata URI stored in the on-chain `BondingCurve.uri` field. This URI is **set by the token creator** and could point to any HTTP endpoint.
 
 The SDK:
-- Uses `fetchWithFallback()` which rewrites Irys gateway URLs to uploader URLs
+- Calls `fetch(uri)` with a 10-second `AbortController` timeout (inlined in `tokens.ts`)
 - Parses the JSON response for `description`, `image`, `twitter`, `telegram`, `website`
 - Fails gracefully — catches errors and adds a warning
 
-**Risk:** The metadata URI is creator-controlled, so a malicious creator could set it to a slow/hostile endpoint. As of v3.2.4, `fetchWithFallback` enforces a 10-second timeout via `AbortController`. Slow endpoints are aborted and the error is caught gracefully. This is not in any transaction path.
+**Risk:** The metadata URI is creator-controlled, so a malicious creator could set it to a slow/hostile endpoint. The 10-second timeout aborts the fetch; errors are caught gracefully. This is not in any transaction path.
 
 ---
 
@@ -364,10 +363,10 @@ The entire auto-discovery path is wrapped in a try/catch. If `getTokenLargestAcc
 ### L-1: No Timeout on Metadata URI Fetch — RESOLVED in v3.2.4
 
 **Severity:** Low
-**File:** `gateway.ts`
+**File:** `tokens.ts` (was `gateway.ts`; module removed in v10.3.0)
 **Description:** `getToken()` fetches the metadata URI (creator-controlled) without a timeout. A malicious or slow endpoint could cause `getToken()` to hang indefinitely.
 **Impact:** Denial of service for `getToken()` callers. Does not affect transaction building.
-**Resolution:** `fetchWithFallback` now accepts a `timeoutMs` parameter (default 10s) and enforces it via `AbortController`. Slow/hanging endpoints are aborted and the error is caught gracefully.
+**Resolution:** Metadata fetch uses `fetch()` + `AbortController` with a 10s timeout. Slow/hanging endpoints are aborted and the error is caught gracefully. (Previously lived in `gateway.ts`; inlined into `tokens.ts` when the gateway module was removed alongside Irys.)
 
 ### L-2: Silent Slippage Clamping — RESOLVED in v3.2.4
 
@@ -392,12 +391,11 @@ The entire auto-discovery path is wrapped in a try/catch. If `getTokenLargestAcc
 **Description:** Buy and sell builders do not check for zero `amount_sol` or `amount_tokens`. Zero amounts will produce zero-output transactions that fail on-chain (`MIN_SOL_AMOUNT` check).
 **Impact:** Wasted transaction fee. The on-chain program rejects the transaction safely.
 
-### I-2: Vote Parameter Encoding
+### I-2: Vote Parameter Encoding — RESOLVED in v10.2.0 (V36)
 
 **Severity:** Informational
-**File:** `transactions.ts:179`
-**Description:** The vote parameter encoding is `return → true`, `burn → false`, `undefined → null`. This inverted convention (return=true, burn=false) matches the on-chain program but could confuse SDK consumers who might expect burn=true.
-**Impact:** None — encoding is correct. Documentation should clarify the inversion.
+**Description:** The `vote` parameter had an inverted encoding (`return → true`, `burn → false`) that could confuse SDK consumers.
+**Resolution:** The entire vote mechanism was removed in V36 — `vote` parameter dropped from `BuyArgs` on-chain and from `BuyParams`/`DirectBuyParams` in the SDK. 100% of bought tokens go to the buyer. No inversion remains to document.
 
 ### I-3: CoinGecko Rate Limiting
 
@@ -444,7 +442,7 @@ The entire auto-discovery path is wrapped in a try/catch. If `getTokenLargestAcc
 The Torch SDK v4.0.1 is a well-structured, minimal-surface TypeScript library that correctly mirrors the on-chain Torch Market V4.0.1 program. Key findings:
 
 1. **PDA derivation is correct** — all 11 Torch PDAs and 5 Raydium PDAs match the on-chain seeds exactly.
-2. **Quote math is correct** — BigInt arithmetic matches the on-chain Rust `checked_mul`/`checked_div` behavior, including the dynamic treasury rate, 90/10 token split, and constant product formula.
+2. **Quote math is correct** — BigInt arithmetic matches the on-chain Rust `checked_mul`/`checked_div` behavior, including the dynamic treasury rate and constant product formula. (The 90/10 buyer/treasury token split was removed in V36; 100% of tokens now go to the buyer.)
 3. **Vault integration is correct** — vault PDA derived from creator, wallet link derived from buyer, both null when vault not used.
 4. **No key custody** — the SDK never touches private keys. All transactions are returned unsigned.
 5. **Minimal dependency surface** — 4 runtime deps, all standard Solana ecosystem.
@@ -495,15 +493,21 @@ The Torch SDK v4.0.1 is a well-structured, minimal-surface TypeScript library th
 
 36. **V10.2.0 Vote vault removal (V36)** — `BURN_RATE_BPS` removed, 100% of `tokens_out` goes to buyer (was 90/10 split). `vote` parameter removed from `BuyArgs` (IDL change). `BuyParams`/`DirectBuyParams` no longer accept `vote`. `calculateTokensOut` returns `tokensToUser == tokensOut` (removed `tokensToCommunity`). `BuyQuoteResult` no longer has `tokens_to_treasury`. `TokenDetail` no longer has `tokens_in_vote_vault`, `votes_return`, `votes_burn`. `TREASURY_SOL_MAX_BPS` increased from 1500 (15%) to 1750 (17.5%). New `sendCreateToken(connection, wallet, params)` — Phantom-friendly token creation via `signAndSendTransaction` (pre-simulates with `sigVerify: false`, avoids malicious dapp warning from partially-signed mint keypair). `irysToArweave` replaces `irysToUploader` in `gateway.ts` (Irys gateway dead, all reads via arweave.net). 6 tokens blacklisted (Irys data loss). IDL updated to v10.2.0. 58 Kani proofs, 59 E2E tests all passing.
 
+37. **V10.3.0 SDK-only dead-code cleanup** — No on-chain changes. `src/gateway.ts` removed entirely (Irys project deprecated); metadata fetch inlined into `tokens.ts` as direct `fetch()` + 10s `AbortController` timeout (same security property as before, simpler surface). `VOTE_SEED` constant and `getVoteRecordPda()` helper removed from `program.ts` (TS-only scaffolding, zero callers — dead since V36). `'governance_vote'` variant removed from `ConfirmResult.event_type` union; corresponding log-parse branch removed from `said.ts`. Stale `[V36]` / `[V13]` / `[V34]` version-gate scar comments scrubbed from `types.ts`, `transactions.ts`, `program.ts`, and `constants.ts`. `BondingCurve` interface retains the `vote_*` fields (`vote_vault_balance`, `votes_return`, `votes_burn`, `total_voters`, `vote_finalized`, `vote_result_return`) — these bytes still occupy slots in the on-chain struct and removing them would misalign Anchor deserialization; a single comment at the interface documents this. New public exports: `getTorchVaultPda`, `getVaultWalletLinkPda`, `getBondingCurvePda` from `program.ts` (advanced-usage helpers — e.g. reading vault-owned ATAs directly without the full SDK read helpers). Misleading docstring on `buildMigrateTransaction` corrected: it previously claimed the buy "auto-bundles migration" when in fact `buildBuyTransaction` returns a **separate** `migrationTransaction` that the caller must send alongside the buy. **Net effect:** ~180 lines removed, no behavior change, no new signing paths, no new attack surface. I-2 (vote parameter encoding) marked RESOLVED. No Kani proofs affected (cleanup is SDK-side, doesn't touch arithmetic).
+
+38. **V10.4.0 SDK completeness pass — no more IDL hacks for end users** — SDK-only change, no on-chain program changes. Three behavior fixes + public-surface expansion driven by auditing where the SDK's own e2e test was reaching below the public API. **Fixes:** `buildBorrowTransaction`, `buildRepayTransaction`, and `buildCloseShortTransaction` now idempotently create the user's personal Token-2022 ATA before the program instruction (matching the pattern already present in `buildLiquidateTransaction`, `buildOpenShortTransaction`, `buildLiquidateShortTransaction`). On-chain the `borrow`/`repay`/`close_short` instructions declare the borrower/shorter token account as `mut` + non-optional (verified in IDL), so the handler requires it to exist even in vault mode — collateral flows vault ATA → user ATA → collateral_vault. Integrators who only ever bought via vault previously hit `AccountNotInitialized` here; the SDK now handles the intermediate ATA creation itself. No new attack surface — idempotent ATA creation has the same semantics whether or not the account already exists. **New public builder:** `buildAdvanceProtocolEpochTransaction(connection, { payer })` + `AdvanceProtocolEpochParams` type. Wraps the permissionless `advance_protocol_epoch` crank that rolls the protocol epoch forward so the previous epoch's trading-volume-weighted rewards become claimable via `buildClaimProtocolRewardsTransaction`. Previously required integrators to instantiate Anchor and call `.methods.advanceProtocolEpoch().rpc()` directly — the SDK's own test was doing this, which was the clearest signal the surface was incomplete. **New public exports from `index.ts`:** constants (`TOKEN_2022_PROGRAM_ID`, `WSOL_MINT`, `PROTOCOL_TREASURY_SEED`) and PDA/ATA derivers (`getProtocolTreasuryPda`, `getTokenTreasuryPda`, `getTreasuryTokenAccount`, `getRaydiumMigrationAccounts`). These were already defined in `program.ts` / `constants.ts` but unreachable from the public entry. Integrators legitimately need them for advanced flows — e.g. deriving Raydium pool vaults for post-migration price reads, or resolving the treasury's Token-2022 ATA for balance checks. **Test cleanup:** all `require('../src/program')`, `require('../dist/torch_market.json')`, hardcoded `TOKEN_2022` PublicKey literals, raw `Program(idl, provider)` / `AnchorProvider` instantiation, and hand-rolled `PublicKey.findProgramAddressSync` calls for well-known PDAs were removed from `tests/test_e2e.ts`. The test now exercises the SDK entirely through its public surface, which is the correctness condition for any SDK — if the test needs IDL hacks, the SDK is incomplete. Three duplicated inline `getVaultTokenBalance` helpers consolidated into one test-local helper composed from public SDK exports. The pre-migration bonding curve snapshot now uses `fetchTokenRaw` instead of instantiating Anchor. **Net effect:** `buildAdvanceProtocolEpochTransaction` is the first new instruction builder since v10.2.0; 7 new constants/PDA exports added; 3 silent-failure-in-vault-mode bugs fixed; test_e2e.ts now runs through public API only. No Kani proofs affected — changes are SDK-side and don't touch arithmetic or account-layout invariants.
+
+39. **V10.5.0 off-chain interest projection — closes a visibility gap for liquidation scanners** — SDK-only change, no on-chain program changes. Surfaced by the torch-liquidation-kit e2e test: after a 490-day time-travel, a loan at ~28% LTV with an uncomputed interest accrual displayed `health='healthy'`, because the SDK's read functions (`getLoanPosition`, `getShortPosition`, `getAllLoanPositions`) returned the raw stored `accrued_interest` from the `LoanPosition`/`ShortPosition` accounts. On-chain, `accrue_interest()` runs only inside mutating instructions (borrow/repay/liquidate/open_short/close_short/liquidate_short) — so the stored value is frozen at `last_update_slot` until someone touches the position. Off-chain scanners saw perpetually-stale health, producing a deadlock: the bot couldn't find a liquidatable target → nobody touched the loan → the stored interest never updated → the loan never *looked* liquidatable, even though the on-chain program would happily liquidate it if anyone called. **Fix:** added `projectAccruedInterest(principal, stored, last_update_slot, current_slot, rate_bps)` matching the on-chain formula in `programs/torch_market/src/handlers/lending.rs:accrue_interest` exactly (`interest = principal × rate_bps × slots_elapsed / (10_000 × EPOCH_DURATION_SLOTS)`, 7-day epochs, simple-linear, u128 math via BigInt to preserve precision at long horizons). The three read functions now fetch `connection.getSlot('confirmed')` alongside account data, project interest forward, and derive `total_owed` / `current_ltv_bps` / `health` from the projected value. **New fields on `LoanPositionInfo` and `ShortPositionInfo`:** `accrued_interest_stored` (raw on-chain value as of `last_update_slot`) and `last_update_slot` itself — so callers who need the instant-of-signing value for exact repay sizing can get it, while `accrued_interest` carries the projected value used for health. The formula is read verbatim from the Rust source, so the projection matches what the program will compute at the next touch; no drift, no overestimation. **Regression guards:** added explicit `getLoanPosition(...).health === 'liquidatable'` and `getShortPosition(...).health === 'liquidatable'` assertions in `tests/test_e2e.ts` between the time-travel step and the liquidation call, in both M6-equivalent (long) and M7 (short) flows. These assertions would fail immediately if someone reverted the projection, which prior to this change never happened — the test ran the liquidation tx and trusted the on-chain accrual to handle it, which masked the off-chain visibility gap. **Net effect:** no new public builders, 2 new transparent fields per position type, 3 read functions now slot-aware, 2 new regression guards. No on-chain changes, no new signing paths, no new attack surface. The fix makes the SDK's view of `health` match what the on-chain liquidate handler will compute at instruction time — a correctness alignment, not a new feature. 57 E2E tests all passing (including the two new projection-health guards).
+
 The SDK is safe for production use by AI agents and applications interacting with the Torch Market protocol.
 
 ---
 
 ## Audit Certification
 
-This audit was performed by Claude Opus 4.6 (Anthropic). Original audit on February 12, 2026 (v3.2.3). Updated February 14, 2026 for v3.2.4 remediation. Updated February 15, 2026 for v3.3.0 (tiered bonding curves, harvest_fees security fix, Kani proof updates). Updated February 16, 2026 for v3.4.0 (tiered fee structure). Updated February 19, 2026 for v3.6.8 (V25 pump-style reserves, V26 permissionless migration, V27 pool validation, V28 authority transfer, lending accounting fix, utilization cap fix, live pool price, dynamic network detection, pre-migration buyback removal). Updated February 20, 2026 for v3.7.0 (V28 `update_authority` removed — authority transfer now via multisig tooling, V27 treasury lock with 250M locked tokens, PDA-based pool validation, pre-migration buyback handler removed, 27 instructions total). Updated February 20, 2026 for v3.7.2 (treasury cranks: auto-buyback with full client-side pre-checks, harvest fees with auto-discovery and graceful RPC fallback, dynamic compute budget, new `sources` param, E2E test coverage across all three test suites). Updated February 21, 2026 for v3.7.10 (V20 swap fees to SOL: new `buildSwapFeesToSolTransaction` bundles harvest + Raydium swap in one atomic tx, vault ordering bug fix in `validate_pool_accounts`, 28 instructions). Updated February 22, 2026 for v3.7.17 (V29 on-chain metadata: Metaplex `buildAddMetadataTransaction` removed, new `getTokenMetadata` read-only function, transfer fee 1%→0.1%, IDL updated to v3.7.17). Updated February 23, 2026 for v3.7.17 loan position scanner (`getAllLoanPositions` — batch scan all loan positions for a token with health computation). Updated February 26, 2026 for v3.7.22 (V33 buyback removal — `buildAutoBuybackTransaction` and `AutoBuybackParams` removed, on-chain `execute_auto_buyback` instruction removed, lending cap 50%→70%, IDL v3.7.7, 27 instructions, 39 Kani proofs). Updated March 3, 2026 for v3.7.29 (reclaim failed tokens — new `buildReclaimFailedTokenTransaction`, `ReclaimParams`, `reclaimed` token status, `last_activity_at` field; per-user borrow cap with `UserBorrowCapExceeded` error; `getLendingInfo` exposes `utilization_cap_bps` and `borrow_share_multiplier`; IDL v3.7.9, 27 instructions, 43 Kani proofs). Updated March 4, 2026 for v3.7.30 (V35 community token option — new `community_token` param on `buildCreateTokenTransaction`, default true, 0% creator fees for community tokens; IDL v3.7.10, 27 instructions, 48 Kani proofs). Updated March 10, 2026 for v3.7.37 (message enrichment — `getMessages` with `{ enrich: true }` batch-verifies senders via SAID Protocol, populates `sender_verified`, `sender_trust_tier`, `sender_said_name`, `sender_badge_url`; opt-in, read-only, no on-chain changes). Updated March 19, 2026 for v4.1.2 (`sendBuy`/`sendDirectBuy` helpers, `WalletAdapter` interface, default-all pagination). All source files were read in full and cross-referenced against the on-chain program. The E2E test suite validates the SDK against a Surfpool mainnet fork. Separate devnet E2E test validates the full lifecycle including V26 migration on Solana devnet. Tiers E2E test validates harvest and lending across Flame/Torch. Independent human security auditor verified the on-chain program and frontend.
+This audit was performed by Claude Opus 4.6 (Anthropic). Original audit on February 12, 2026 (v3.2.3). Updated February 14, 2026 for v3.2.4 remediation. Updated February 15, 2026 for v3.3.0 (tiered bonding curves, harvest_fees security fix, Kani proof updates). Updated February 16, 2026 for v3.4.0 (tiered fee structure). Updated February 19, 2026 for v3.6.8 (V25 pump-style reserves, V26 permissionless migration, V27 pool validation, V28 authority transfer, lending accounting fix, utilization cap fix, live pool price, dynamic network detection, pre-migration buyback removal). Updated February 20, 2026 for v3.7.0 (V28 `update_authority` removed — authority transfer now via multisig tooling, V27 treasury lock with 250M locked tokens, PDA-based pool validation, pre-migration buyback handler removed, 27 instructions total). Updated February 20, 2026 for v3.7.2 (treasury cranks: auto-buyback with full client-side pre-checks, harvest fees with auto-discovery and graceful RPC fallback, dynamic compute budget, new `sources` param, E2E test coverage across all three test suites). Updated February 21, 2026 for v3.7.10 (V20 swap fees to SOL: new `buildSwapFeesToSolTransaction` bundles harvest + Raydium swap in one atomic tx, vault ordering bug fix in `validate_pool_accounts`, 28 instructions). Updated February 22, 2026 for v3.7.17 (V29 on-chain metadata: Metaplex `buildAddMetadataTransaction` removed, new `getTokenMetadata` read-only function, transfer fee 1%→0.1%, IDL updated to v3.7.17). Updated February 23, 2026 for v3.7.17 loan position scanner (`getAllLoanPositions` — batch scan all loan positions for a token with health computation). Updated February 26, 2026 for v3.7.22 (V33 buyback removal — `buildAutoBuybackTransaction` and `AutoBuybackParams` removed, on-chain `execute_auto_buyback` instruction removed, lending cap 50%→70%, IDL v3.7.7, 27 instructions, 39 Kani proofs). Updated March 3, 2026 for v3.7.29 (reclaim failed tokens — new `buildReclaimFailedTokenTransaction`, `ReclaimParams`, `reclaimed` token status, `last_activity_at` field; per-user borrow cap with `UserBorrowCapExceeded` error; `getLendingInfo` exposes `utilization_cap_bps` and `borrow_share_multiplier`; IDL v3.7.9, 27 instructions, 43 Kani proofs). Updated March 4, 2026 for v3.7.30 (V35 community token option — new `community_token` param on `buildCreateTokenTransaction`, default true, 0% creator fees for community tokens; IDL v3.7.10, 27 instructions, 48 Kani proofs). Updated March 10, 2026 for v3.7.37 (message enrichment — `getMessages` with `{ enrich: true }` batch-verifies senders via SAID Protocol, populates `sender_verified`, `sender_trust_tier`, `sender_said_name`, `sender_badge_url`; opt-in, read-only, no on-chain changes). Updated March 19, 2026 for v4.1.2 (`sendBuy`/`sendDirectBuy` helpers, `WalletAdapter` interface, default-all pagination). Updated April 19, 2026 for v10.3.0 (SDK-only dead-code cleanup — `gateway.ts` removed, vote-related TS scaffolding scrubbed, new PDA-deriver exports; no on-chain changes, no new signing paths). Updated April 19, 2026 for v10.4.0 (SDK completeness pass — new `buildAdvanceProtocolEpochTransaction` builder, 7 new constant/PDA exports, idempotent personal ATA creation added to `buildBorrowTransaction`/`buildRepayTransaction`/`buildCloseShortTransaction`; tests/test_e2e.ts cleaned to use only the public SDK surface; no on-chain changes). Updated April 19, 2026 for v10.5.0 (off-chain interest projection in `getLoanPosition`/`getShortPosition`/`getAllLoanPositions` — projects stored `accrued_interest` forward to the current slot using the on-chain formula, so off-chain scanners and bots see accurate `health`/`current_ltv_bps` without needing to touch the position first; new `accrued_interest_stored` and `last_update_slot` fields preserve the raw on-chain values for callers who need instant-of-signing amounts; two regression guards added to test_e2e.ts asserting projected health is `liquidatable` between time-travel and liquidation; no on-chain changes, no new signing paths). All source files were read in full and cross-referenced against the on-chain program. The E2E test suite validates the SDK against a Surfpool mainnet fork. Separate devnet E2E test validates the full lifecycle including V26 migration on Solana devnet. Tiers E2E test validates harvest and lending across Flame/Torch. Independent human security auditor verified the on-chain program and frontend.
 
 **Auditor:** Claude Opus 4.6
-**Date:** 2026-04-02
-**SDK Version:** 10.2.6
-**On-Chain Version:** V10.2.6 (Program ID: `8hbUkonssSEEtkqzwM7ZcZrD9evacM92TcWSooVF4BeT`)
+**Date:** 2026-04-19
+**SDK Version:** 10.5.0
+**On-Chain Version:** V10.2.6 (Program ID: `8hbUkonssSEEtkqzwM7ZcZrD9evacM92TcWSooVF4BeT`) — unchanged from v10.2.6 audit

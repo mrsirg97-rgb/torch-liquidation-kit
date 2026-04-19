@@ -5,7 +5,7 @@
  * Agents sign these locally and submit to the network.
  */
 import { Connection, PublicKey } from '@solana/web3.js';
-import { BuyParams, DirectBuyParams, SellParams, CreateTokenParams, StarParams, MigrateParams, BorrowParams, RepayParams, LiquidateParams, OpenShortParams, CloseShortParams, LiquidateShortParams, EnableShortSellingParams, ClaimProtocolRewardsParams, HarvestFeesParams, SwapFeesToSolParams, CreateVaultParams, DepositVaultParams, WithdrawVaultParams, WithdrawTokensParams, LinkWalletParams, UnlinkWalletParams, TransferAuthorityParams, ReclaimParams, TransactionResult, BuyTransactionResult, CreateTokenResult, WalletAdapter } from './types';
+import { BuyParams, DirectBuyParams, SellParams, CreateTokenParams, StarParams, MigrateParams, BorrowParams, RepayParams, LiquidateParams, OpenShortParams, CloseShortParams, LiquidateShortParams, EnableShortSellingParams, ClaimProtocolRewardsParams, HarvestFeesParams, SwapFeesToSolParams, AdvanceProtocolEpochParams, CreateVaultParams, DepositVaultParams, WithdrawVaultParams, WithdrawTokensParams, LinkWalletParams, UnlinkWalletParams, TransferAuthorityParams, ReclaimParams, TransactionResult, BuyTransactionResult, CreateTokenResult, WalletAdapter } from './types';
 /**
  * Build an unsigned vault-funded buy transaction.
  *
@@ -209,24 +209,8 @@ export declare const buildReclaimFailedTokenTransaction: (connection: Connection
  * @returns Unsigned transaction
  */
 export declare const buildWithdrawTokensTransaction: (connection: Connection, params: WithdrawTokensParams) => Promise<TransactionResult>;
-/**
- * Build an unsigned migration transaction.
- *
- * Permissionless — anyone can call once bonding completes and vote is finalized.
- * Combines fund_migration_wsol + migrate_to_dex in a single transaction.
- * Creates a Raydium CPMM pool with locked liquidity (LP tokens burned).
- *
- * [V28] Payer fronts ~1 SOL for Raydium costs (pool creation fee + account rent).
- * Treasury reimburses the exact cost in the same transaction. Net payer cost: 0 SOL.
- *
- * Prefer using buildBuyTransaction — it auto-bundles migration when the buy
- * completes bonding, so callers don't need to call this separately.
- *
- * @param connection - Solana RPC connection
- * @param params - Migration parameters (mint, payer)
- * @returns Unsigned transaction and descriptive message
- */
 export declare const buildMigrateTransaction: (connection: Connection, params: MigrateParams) => Promise<TransactionResult>;
+export declare const buildAdvanceProtocolEpochTransaction: (connection: Connection, params: AdvanceProtocolEpochParams) => Promise<TransactionResult>;
 /**
  * Build an unsigned harvest-fees transaction.
  *

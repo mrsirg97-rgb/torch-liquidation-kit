@@ -9,7 +9,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.buildEnableShortSellingTransaction = exports.buildLiquidateShortTransaction = exports.buildCloseShortTransaction = exports.buildOpenShortTransaction = exports.buildSwapFeesToSolTransaction = exports.buildHarvestFeesTransaction = exports.buildMigrateTransaction = exports.buildWithdrawTokensTransaction = exports.buildReclaimFailedTokenTransaction = exports.buildClaimProtocolRewardsTransaction = exports.buildLiquidateTransaction = exports.buildRepayTransaction = exports.buildBorrowTransaction = exports.buildTransferAuthorityTransaction = exports.buildUnlinkWalletTransaction = exports.buildLinkWalletTransaction = exports.buildWithdrawVaultTransaction = exports.buildDepositVaultTransaction = exports.buildCreateVaultTransaction = exports.buildStarTransaction = exports.sendCreateToken = exports.buildCreateTokenTransaction = exports.buildSellTransaction = exports.sendDirectBuy = exports.sendBuy = exports.buildDirectBuyTransaction = exports.buildBuyTransaction = void 0;
+exports.buildEnableShortSellingTransaction = exports.buildLiquidateShortTransaction = exports.buildCloseShortTransaction = exports.buildOpenShortTransaction = exports.buildSwapFeesToSolTransaction = exports.buildHarvestFeesTransaction = exports.buildAdvanceProtocolEpochTransaction = exports.buildMigrateTransaction = exports.buildWithdrawTokensTransaction = exports.buildReclaimFailedTokenTransaction = exports.buildClaimProtocolRewardsTransaction = exports.buildLiquidateTransaction = exports.buildRepayTransaction = exports.buildBorrowTransaction = exports.buildTransferAuthorityTransaction = exports.buildUnlinkWalletTransaction = exports.buildLinkWalletTransaction = exports.buildWithdrawVaultTransaction = exports.buildDepositVaultTransaction = exports.buildCreateVaultTransaction = exports.buildStarTransaction = exports.sendCreateToken = exports.buildCreateTokenTransaction = exports.buildSellTransaction = exports.sendDirectBuy = exports.sendBuy = exports.buildDirectBuyTransaction = exports.buildBuyTransaction = void 0;
 const web3_js_1 = require("@solana/web3.js");
 const spl_token_1 = require("@solana/spl-token");
 const anchor_1 = require("@coral-xyz/anchor");
@@ -74,9 +74,7 @@ const finalizeTransaction = async (connection, tx, feePayer) => {
 // Buy
 // ============================================================================
 // Internal buy builder shared by both vault and direct variants
-const buildBuyTransactionInternal = async (connection, mintStr, buyerStr, amount_sol, slippage_bps, 
-// [V36] Removed: vote parameter — vote vault removed
-message, vaultCreatorStr, quote) => {
+const buildBuyTransactionInternal = async (connection, mintStr, buyerStr, amount_sol, slippage_bps, message, vaultCreatorStr, quote) => {
     const mint = new web3_js_1.PublicKey(mintStr);
     const buyer = new web3_js_1.PublicKey(buyerStr);
     const tokenData = await (0, tokens_1.fetchTokenRaw)(connection, mint);
@@ -88,9 +86,9 @@ message, vaultCreatorStr, quote) => {
         if (!vaultCreatorStr) {
             throw new Error('Migrated tokens require vault-based trading. Use buildBuyTransaction with a vault parameter.');
         }
-        const resolvedQuote = quote ?? await (0, quotes_1.getBuyQuote)(connection, mintStr, amount_sol);
+        const resolvedQuote = quote ?? (await (0, quotes_1.getBuyQuote)(connection, mintStr, amount_sol));
         const slippage = slippage_bps ?? 100;
-        const minOut = BigInt(resolvedQuote.min_output_tokens) * BigInt(10000 - slippage) / BigInt(10000);
+        const minOut = (BigInt(resolvedQuote.min_output_tokens) * BigInt(10000 - slippage)) / BigInt(10000);
         const result = await buildVaultSwapTransaction(connection, {
             mint: mintStr,
             signer: buyerStr,
@@ -150,7 +148,6 @@ message, vaultCreatorStr, quote) => {
         .buy({
         solAmount: new anchor_1.BN(amount_sol.toString()),
         minTokensOut: new anchor_1.BN(minTokens.toString()),
-        // [V36] vote parameter removed from BuyArgs
     })
         .accounts({
         buyer,
@@ -287,7 +284,7 @@ exports.sendDirectBuy = sendDirectBuy;
  * @returns Unsigned transaction and descriptive message
  */
 const buildSellTransaction = async (connection, params) => {
-    const { mint: mintStr, seller: sellerStr, amount_tokens, slippage_bps = 100, message, vault: vaultCreatorStr, quote } = params;
+    const { mint: mintStr, seller: sellerStr, amount_tokens, slippage_bps = 100, message, vault: vaultCreatorStr, quote, } = params;
     const mint = new web3_js_1.PublicKey(mintStr);
     const seller = new web3_js_1.PublicKey(sellerStr);
     const tokenData = await (0, tokens_1.fetchTokenRaw)(connection, mint);
@@ -299,9 +296,9 @@ const buildSellTransaction = async (connection, params) => {
         if (!vaultCreatorStr) {
             throw new Error('Migrated tokens require vault-based trading. Use buildSellTransaction with a vault parameter.');
         }
-        const resolvedQuote = quote ?? await (0, quotes_1.getSellQuote)(connection, mintStr, amount_tokens);
+        const resolvedQuote = quote ?? (await (0, quotes_1.getSellQuote)(connection, mintStr, amount_tokens));
         const slippage = slippage_bps ?? 100;
-        const minOut = BigInt(resolvedQuote.min_output_sol) * BigInt(10000 - slippage) / BigInt(10000);
+        const minOut = (BigInt(resolvedQuote.min_output_sol) * BigInt(10000 - slippage)) / BigInt(10000);
         const result = await buildVaultSwapTransaction(connection, {
             mint: mintStr,
             signer: sellerStr,
@@ -396,7 +393,7 @@ exports.buildSellTransaction = buildSellTransaction;
  * @returns Partially-signed transaction, mint PublicKey, and mint Keypair
  */
 const buildCreateTokenTransaction = async (connection, params) => {
-    const { creator: creatorStr, name, symbol, metadata_uri, sol_target = 0, community_token = true } = params;
+    const { creator: creatorStr, name, symbol, metadata_uri, sol_target = 0, community_token = true, } = params;
     const creator = new web3_js_1.PublicKey(creatorStr);
     if (name.length > 32)
         throw new Error('Name must be 32 characters or less');
@@ -427,7 +424,13 @@ const buildCreateTokenTransaction = async (connection, params) => {
     const provider = makeDummyProvider(connection, creator);
     const program = new anchor_1.Program(torch_market_json_1.default, provider);
     const createIx = await program.methods
-        .createToken({ name, symbol, uri: metadata_uri, solTarget: new anchor_1.BN(sol_target), communityToken: community_token })
+        .createToken({
+        name,
+        symbol,
+        uri: metadata_uri,
+        solTarget: new anchor_1.BN(sol_target),
+        communityToken: community_token,
+    })
         .accounts({
         creator,
         globalConfig,
@@ -750,7 +753,7 @@ exports.buildTransferAuthorityTransaction = buildTransferAuthorityTransaction;
  * @returns Unsigned transaction and descriptive message
  */
 const buildBorrowTransaction = async (connection, params) => {
-    const { mint: mintStr, borrower: borrowerStr, collateral_amount, sol_to_borrow, vault: vaultCreatorStr } = params;
+    const { mint: mintStr, borrower: borrowerStr, collateral_amount, sol_to_borrow, vault: vaultCreatorStr, } = params;
     const mint = new web3_js_1.PublicKey(mintStr);
     const borrower = new web3_js_1.PublicKey(borrowerStr);
     // Derive PDAs
@@ -765,6 +768,10 @@ const buildBorrowTransaction = async (connection, params) => {
     const { torchVault: torchVaultAccount, walletLink: vaultWalletLinkAccount } = deriveVaultAccounts(vaultCreatorStr, borrower);
     const vaultTokenAccount = torchVaultAccount ? getVaultTokenAta(mint, torchVaultAccount) : null;
     const tx = new web3_js_1.Transaction();
+    // borrower_token_account is mut + non-optional in the borrow instruction,
+    // so the on-chain handler requires it to exist even in vault mode (collateral
+    // flows vault → borrower ATA → collateral_vault).
+    tx.add((0, spl_token_1.createAssociatedTokenAccountIdempotentInstruction)(borrower, borrowerTokenAccount, borrower, mint, spl_token_1.TOKEN_2022_PROGRAM_ID, spl_token_1.ASSOCIATED_TOKEN_PROGRAM_ID));
     if (torchVaultAccount) {
         tx.add(createVaultTokenAtaIx(borrower, mint, torchVaultAccount));
     }
@@ -828,6 +835,8 @@ const buildRepayTransaction = async (connection, params) => {
     const { torchVault: torchVaultAccount, walletLink: vaultWalletLinkAccount } = deriveVaultAccounts(vaultCreatorStr, borrower);
     const vaultTokenAccount = torchVaultAccount ? getVaultTokenAta(mint, torchVaultAccount) : null;
     const tx = new web3_js_1.Transaction();
+    // borrower_token_account is mut + non-optional; must exist even in vault mode.
+    tx.add((0, spl_token_1.createAssociatedTokenAccountIdempotentInstruction)(borrower, borrowerTokenAccount, borrower, mint, spl_token_1.TOKEN_2022_PROGRAM_ID, spl_token_1.ASSOCIATED_TOKEN_PROGRAM_ID));
     if (torchVaultAccount) {
         tx.add(createVaultTokenAtaIx(borrower, mint, torchVaultAccount));
     }
@@ -872,7 +881,7 @@ exports.buildRepayTransaction = buildRepayTransaction;
  * @returns Unsigned transaction and descriptive message
  */
 const buildLiquidateTransaction = async (connection, params) => {
-    const { mint: mintStr, liquidator: liquidatorStr, borrower: borrowerStr, vault: vaultCreatorStr } = params;
+    const { mint: mintStr, liquidator: liquidatorStr, borrower: borrowerStr, vault: vaultCreatorStr, } = params;
     const mint = new web3_js_1.PublicKey(mintStr);
     const liquidator = new web3_js_1.PublicKey(liquidatorStr);
     const borrower = new web3_js_1.PublicKey(borrowerStr);
@@ -1060,33 +1069,20 @@ exports.buildWithdrawTokensTransaction = buildWithdrawTokensTransaction;
 // ============================================================================
 // Migration (V26)
 // ============================================================================
-/**
- * Build an unsigned migration transaction.
- *
- * Permissionless — anyone can call once bonding completes and vote is finalized.
- * Combines fund_migration_wsol + migrate_to_dex in a single transaction.
- * Creates a Raydium CPMM pool with locked liquidity (LP tokens burned).
- *
- * [V28] Payer fronts ~1 SOL for Raydium costs (pool creation fee + account rent).
- * Treasury reimburses the exact cost in the same transaction. Net payer cost: 0 SOL.
- *
- * Prefer using buildBuyTransaction — it auto-bundles migration when the buy
- * completes bonding, so callers don't need to call this separately.
- *
- * @param connection - Solana RPC connection
- * @param params - Migration parameters (mint, payer)
- * @returns Unsigned transaction and descriptive message
- */
+// build an unsigned migration transaction.
+// permissionless — anyone can call once bonding completes.
+// combines fund_migration_wsol + migrate_to_dex and creates a Raydium CPMM pool with LP tokens burned.
+// payer fronts ~1 SOL for Raydium pool creation + account rent; treasury reimburses in the same tx (net cost: 0).
+// when a buy completes bonding, buildBuyTransaction returns a separate migrationTransaction — the caller is
+// expected to send both. Call buildMigrateTransaction directly only if that second tx was never sent.
 const buildMigrateTransaction = async (connection, params) => {
     const { mint: mintStr, payer: payerStr } = params;
     const mint = new web3_js_1.PublicKey(mintStr);
     const payer = new web3_js_1.PublicKey(payerStr);
-    // Derive PDAs
     const [bondingCurvePda] = (0, program_1.getBondingCurvePda)(mint);
     const [globalConfigPda] = (0, program_1.getGlobalConfigPda)();
     const [treasuryPda] = (0, program_1.getTokenTreasuryPda)(mint);
     const treasuryTokenAccount = (0, program_1.getTreasuryTokenAccount)(mint, treasuryPda);
-    // [V31] Treasury lock PDA and its token ATA (receives vote-return tokens)
     const [treasuryLock] = (0, program_1.getTreasuryLockPda)(mint);
     const treasuryLockTokenAccount = (0, program_1.getTreasuryLockTokenAccount)(mint, treasuryLock);
     // Token vault = bonding curve's Token-2022 ATA
@@ -1174,7 +1170,7 @@ exports.buildMigrateTransaction = buildMigrateTransaction;
  * @returns Unsigned transaction and descriptive message
  */
 const buildVaultSwapTransaction = async (connection, params) => {
-    const { mint: mintStr, signer: signerStr, vault_creator: vaultCreatorStr, amount_in, minimum_amount_out, is_buy, message } = params;
+    const { mint: mintStr, signer: signerStr, vault_creator: vaultCreatorStr, amount_in, minimum_amount_out, is_buy, message, } = params;
     const mint = new web3_js_1.PublicKey(mintStr);
     const signer = new web3_js_1.PublicKey(signerStr);
     const vaultCreator = new web3_js_1.PublicKey(vaultCreatorStr);
@@ -1238,9 +1234,7 @@ const buildVaultSwapTransaction = async (connection, params) => {
     addMemoIx(tx, signer, message, 280);
     const versionedTx = await finalizeTransaction(connection, tx, signer);
     const direction = is_buy ? 'Buy' : 'Sell';
-    const amountLabel = is_buy
-        ? `${amount_in / 1e9} SOL`
-        : `${amount_in / 1e6} tokens`;
+    const amountLabel = is_buy ? `${amount_in / 1e9} SOL` : `${amount_in / 1e6} tokens`;
     return {
         transaction: versionedTx,
         message: `${direction} ${amountLabel} via vault DEX swap`,
@@ -1249,6 +1243,25 @@ const buildVaultSwapTransaction = async (connection, params) => {
 // ============================================================================
 // Treasury Cranks
 // ============================================================================
+// permissionless crank — rolls the protocol epoch forward so the previous epoch's
+// trading-volume-weighted rewards become claimable via buildClaimProtocolRewardsTransaction.
+// safe to call repeatedly; the program no-ops if the current epoch hasn't elapsed.
+const buildAdvanceProtocolEpochTransaction = async (connection, params) => {
+    const { payer: payerStr } = params;
+    const payer = new web3_js_1.PublicKey(payerStr);
+    const [protocolTreasuryPda] = (0, program_1.getProtocolTreasuryPda)();
+    const provider = makeDummyProvider(connection, payer);
+    const program = new anchor_1.Program(torch_market_json_1.default, provider);
+    const ix = await program.methods
+        .advanceProtocolEpoch()
+        .accounts({ payer, protocolTreasury: protocolTreasuryPda })
+        .instruction();
+    const tx = new web3_js_1.Transaction();
+    tx.add(ix);
+    const versionedTx = await finalizeTransaction(connection, tx, payer);
+    return { transaction: versionedTx, message: 'Advance protocol epoch' };
+};
+exports.buildAdvanceProtocolEpochTransaction = buildAdvanceProtocolEpochTransaction;
 /**
  * Build an unsigned harvest-fees transaction.
  *
@@ -1505,7 +1518,7 @@ exports.buildSwapFeesToSolTransaction = buildSwapFeesToSolTransaction;
  * @returns Unsigned transaction and descriptive message
  */
 const buildOpenShortTransaction = async (connection, params) => {
-    const { mint: mintStr, shorter: shorterStr, sol_collateral, tokens_to_borrow, vault: vaultCreatorStr } = params;
+    const { mint: mintStr, shorter: shorterStr, sol_collateral, tokens_to_borrow, vault: vaultCreatorStr, } = params;
     const mint = new web3_js_1.PublicKey(mintStr);
     const shorter = new web3_js_1.PublicKey(shorterStr);
     // Derive PDAs
@@ -1593,6 +1606,8 @@ const buildCloseShortTransaction = async (connection, params) => {
     const { torchVault: torchVaultAccount, walletLink: vaultWalletLinkAccount } = deriveVaultAccounts(vaultCreatorStr, shorter);
     const vaultTokenAccount = torchVaultAccount ? getVaultTokenAta(mint, torchVaultAccount) : null;
     const tx = new web3_js_1.Transaction();
+    // shorter_token_account is mut + non-optional; must exist even in vault mode.
+    tx.add((0, spl_token_1.createAssociatedTokenAccountIdempotentInstruction)(shorter, shorterTokenAccount, shorter, mint, spl_token_1.TOKEN_2022_PROGRAM_ID, spl_token_1.ASSOCIATED_TOKEN_PROGRAM_ID));
     if (torchVaultAccount) {
         tx.add(createVaultTokenAtaIx(shorter, mint, torchVaultAccount));
     }
@@ -1640,7 +1655,7 @@ exports.buildCloseShortTransaction = buildCloseShortTransaction;
  * @returns Unsigned transaction and descriptive message
  */
 const buildLiquidateShortTransaction = async (connection, params) => {
-    const { mint: mintStr, liquidator: liquidatorStr, borrower: borrowerStr, vault: vaultCreatorStr } = params;
+    const { mint: mintStr, liquidator: liquidatorStr, borrower: borrowerStr, vault: vaultCreatorStr, } = params;
     const mint = new web3_js_1.PublicKey(mintStr);
     const liquidator = new web3_js_1.PublicKey(liquidatorStr);
     const borrower = new web3_js_1.PublicKey(borrowerStr);
