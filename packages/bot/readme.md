@@ -1,6 +1,6 @@
 # torch-liquidation-bot
 
-Vault-based liquidation keeper for [Torch Market](https://torch.market) on Solana. Generates an agent keypair in-process — no user wallet required. All operations route through a Torch Vault. Built on [torchsdk](https://www.npmjs.com/package/torchsdk) v10.5.0.
+Vault-based liquidation keeper for [Torch Market](https://torch.market) on Solana. Generates an agent keypair in-process — no user wallet required. All operations route through a Torch Vault. Built on [torchsdk](https://www.npmjs.com/package/torchsdk) v10.7.1.
 
 ## Install
 
@@ -35,7 +35,7 @@ This bot:
 
 All value flows through the vault. The agent wallet is a stateless controller that holds only gas SOL.
 
-**Off-chain health visibility (torchsdk v10.5.0+):** the SDK projects accrued interest forward to the current slot, so positions that have drifted past the liquidation threshold via interest accrual alone — without any on-chain instruction touching them — show up as `health=liquidatable` immediately. No need for someone else to poke the loan first.
+**Off-chain health visibility (torchsdk v10.7.1+):** the SDK projects accrued interest forward to the current slot, so positions that have drifted past the liquidation threshold via interest accrual alone — without any on-chain instruction touching them — show up as `health=liquidatable` immediately. No need for someone else to poke the loan first.
 
 ## Configuration
 

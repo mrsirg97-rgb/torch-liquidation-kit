@@ -5,7 +5,7 @@
  */
 import { Connection, PublicKey } from '@solana/web3.js';
 import { BondingCurve, Treasury } from './program';
-import { TokenDetail, TokenListParams, TokenListResult, HoldersResult, MessagesResult, LendingInfo, LoanPositionInfo, ShortPositionInfo, AllLoanPositionsResult, VaultInfo, VaultWalletLinkInfo, TokenMetadataResult } from './types';
+import { TokenDetail, TokenListParams, TokenListResult, HoldersResult, MessagesResult, LendingInfo, LoanPositionInfo, ShortPositionInfo, AllLoanPositionsResult, VaultInfo, VaultWalletLinkInfo, UserStatsInfo, ProtocolTreasuryInfo, TreasuryInfo, TokenMetadataResult } from './types';
 declare const fetchTokenRaw: (connection: Connection, mint: PublicKey) => Promise<{
     bondingCurve: BondingCurve;
     treasury: Treasury | null;
@@ -84,5 +84,8 @@ export declare const getVaultForWallet: (connection: Connection, walletStr: stri
  * Returns the link info (which vault it's linked to, when) or null if not linked.
  */
 export declare const getVaultWalletLink: (connection: Connection, walletStr: string) => Promise<VaultWalletLinkInfo | null>;
+export declare const getUserStats: (connection: Connection, walletStr: string) => Promise<UserStatsInfo | null>;
+export declare const getProtocolTreasuryState: (connection: Connection) => Promise<ProtocolTreasuryInfo | null>;
+export declare const getTreasuryState: (connection: Connection, mintStr: string) => Promise<TreasuryInfo | null>;
 export { fetchTokenRaw };
 //# sourceMappingURL=tokens.d.ts.map

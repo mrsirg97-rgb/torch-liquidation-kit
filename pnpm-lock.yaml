@@ -18,8 +18,8 @@ importers:
         specifier: ^6.0.0
         version: 6.0.0
       torchsdk:
-        specifier: 10.5.0
-        version: 10.5.0(@solana/web3.js@1.98.4(bufferutil@4.1.0)(typescript@6.0.3)(utf-8-validate@5.0.10))(bufferutil@4.1.0)(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3)(utf-8-validate@5.0.10)
+        specifier: 10.7.1
+        version: 10.7.1(@solana/web3.js@1.98.4(bufferutil@4.1.0)(typescript@6.0.3)(utf-8-validate@5.0.10))(bufferutil@4.1.0)(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3)(utf-8-validate@5.0.10)
     devDependencies:
       '@types/node':
         specifier: ^25.6.0
@@ -330,8 +330,8 @@ packages:
   toml@3.0.0:
     resolution: {integrity: sha512-y/mWCZinnvxjTKYhJ+pYxwD0mRLVvOtdS2Awbgxln6iEnt4rk0yBxeSBHkGJcPucRiG0e55mwWp+g/05rsrd6w==}
 
-  torchsdk@10.5.0:
-    resolution: {integrity: sha512-3sjCMBPOm760CAXpfFv1YlLUiNR9jGRMcJdGXq4qB7D6hvcF3WDYKEMWp5OB2QD4ePgAT9ofXwDvulQsNuCb7A==}
+  torchsdk@10.7.1:
+    resolution: {integrity: sha512-0juJihGB5z1zyxRQTeHyT4sBxOPNOLurhQQw/kVYrjqCIbmOVTs/n7KvKj5f6P+9nB8tpuKupp9V0XGoGc5VuQ==}
     peerDependencies:
       '@solana/web3.js': ^1.98.0
 
@@ -749,7 +749,7 @@ snapshots:
 
   toml@3.0.0: {}
 
-  torchsdk@10.5.0(@solana/web3.js@1.98.4(bufferutil@4.1.0)(typescript@6.0.3)(utf-8-validate@5.0.10))(bufferutil@4.1.0)(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3)(utf-8-validate@5.0.10):
+  torchsdk@10.7.1(@solana/web3.js@1.98.4(bufferutil@4.1.0)(typescript@6.0.3)(utf-8-validate@5.0.10))(bufferutil@4.1.0)(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3)(utf-8-validate@5.0.10):
     dependencies:
       '@coral-xyz/anchor': 0.32.1(bufferutil@4.1.0)(typescript@6.0.3)(utf-8-validate@5.0.10)
       '@solana/spl-token': 0.4.14(@solana/web3.js@1.98.4(bufferutil@4.1.0)(typescript@6.0.3)(utf-8-validate@5.0.10))(bufferutil@4.1.0)(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3)(utf-8-validate@5.0.10)

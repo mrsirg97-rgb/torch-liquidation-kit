@@ -41,7 +41,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.fetchTokenRaw = exports.getVaultWalletLink = exports.getVaultForWallet = exports.getVault = exports.getAllLoanPositions = exports.getShortPosition = exports.getLoanPosition = exports.getLendingInfo = exports.getMessages = exports.getHolders = exports.getToken = exports.getTokenMetadata = exports.getTokens = void 0;
+exports.fetchTokenRaw = exports.getTreasuryState = exports.getProtocolTreasuryState = exports.getUserStats = exports.getVaultWalletLink = exports.getVaultForWallet = exports.getVault = exports.getAllLoanPositions = exports.getShortPosition = exports.getLoanPosition = exports.getLendingInfo = exports.getMessages = exports.getHolders = exports.getToken = exports.getTokenMetadata = exports.getTokens = void 0;
 const web3_js_1 = require("@solana/web3.js");
 const anchor_1 = require("@coral-xyz/anchor");
 const spl_token_1 = require("@solana/spl-token");
@@ -1069,4 +1069,81 @@ const getVaultWalletLink = async (connection, walletStr) => {
     };
 };
 exports.getVaultWalletLink = getVaultWalletLink;
+// Per-user trading stats (volume, rewards claimed). Returns null if the user has
+// no stats account yet (no trading activity).
+const getUserStats = async (connection, walletStr) => {
+    const wallet = new web3_js_1.PublicKey(walletStr);
+    const coder = new anchor_1.BorshCoder(torch_market_json_1.default);
+    const [userStatsPda] = (0, program_1.getUserStatsPda)(wallet);
+    const accountInfo = await connection.getAccountInfo(userStatsPda);
+    if (!accountInfo)
+        return null;
+    const stats = coder.accounts.decode('UserStats', accountInfo.data);
+    return {
+        address: userStatsPda.toString(),
+        user: stats.user.toString(),
+        total_volume_sol: Number(stats.total_volume.toString()) / constants_1.LAMPORTS_PER_SOL,
+        volume_current_epoch_sol: Number(stats.volume_current_epoch.toString()) / constants_1.LAMPORTS_PER_SOL,
+        volume_previous_epoch_sol: Number(stats.volume_previous_epoch.toString()) / constants_1.LAMPORTS_PER_SOL,
+        last_epoch_claimed: Number(stats.last_epoch_claimed.toString()),
+        total_rewards_claimed_sol: Number(stats.total_rewards_claimed.toString()) / constants_1.LAMPORTS_PER_SOL,
+        last_volume_epoch: Number(stats.last_volume_epoch.toString()),
+    };
+};
+exports.getUserStats = getUserStats;
+// Protocol treasury state (current epoch, balances, distribution accounting).
+// Returns null if the protocol hasn't been initialized yet.
+const getProtocolTreasuryState = async (connection) => {
+    const coder = new anchor_1.BorshCoder(torch_market_json_1.default);
+    const [protocolTreasuryPda] = (0, program_1.getProtocolTreasuryPda)();
+    const accountInfo = await connection.getAccountInfo(protocolTreasuryPda);
+    if (!accountInfo)
+        return null;
+    const t = coder.accounts.decode('ProtocolTreasury', accountInfo.data);
+    return {
+        address: protocolTreasuryPda.toString(),
+        authority: t.authority.toString(),
+        current_balance_sol: Number(t.current_balance.toString()) / constants_1.LAMPORTS_PER_SOL,
+        reserve_floor_sol: Number(t.reserve_floor.toString()) / constants_1.LAMPORTS_PER_SOL,
+        total_fees_received_sol: Number(t.total_fees_received.toString()) / constants_1.LAMPORTS_PER_SOL,
+        total_distributed_sol: Number(t.total_distributed.toString()) / constants_1.LAMPORTS_PER_SOL,
+        current_epoch: Number(t.current_epoch.toString()),
+        last_epoch_ts: Number(t.last_epoch_ts.toString()),
+        total_volume_current_epoch_sol: Number(t.total_volume_current_epoch.toString()) / constants_1.LAMPORTS_PER_SOL,
+        total_volume_previous_epoch_sol: Number(t.total_volume_previous_epoch.toString()) / constants_1.LAMPORTS_PER_SOL,
+        distributable_amount_sol: Number(t.distributable_amount.toString()) / constants_1.LAMPORTS_PER_SOL,
+    };
+};
+exports.getProtocolTreasuryState = getProtocolTreasuryState;
+// Per-token Treasury state: SOL balance, tokens held, harvested fees, stars,
+// and baseline pool reserves captured at migration. Returns null if the token
+// or its treasury hasn't been created yet.
+const getTreasuryState = async (connection, mintStr) => {
+    const mint = new web3_js_1.PublicKey(mintStr);
+    const coder = new anchor_1.BorshCoder(torch_market_json_1.default);
+    const [treasuryPda] = (0, program_1.getTokenTreasuryPda)(mint);
+    const accountInfo = await connection.getAccountInfo(treasuryPda);
+    if (!accountInfo)
+        return null;
+    const t = coder.accounts.decode('Treasury', accountInfo.data);
+    return {
+        address: treasuryPda.toString(),
+        bonding_curve: t.bonding_curve.toString(),
+        mint: t.mint.toString(),
+        sol_balance_sol: Number(t.sol_balance.toString()) / constants_1.LAMPORTS_PER_SOL,
+        tokens_held: Number(t.tokens_held.toString()),
+        harvested_fees_sol: Number(t.harvested_fees.toString()) / constants_1.LAMPORTS_PER_SOL,
+        baseline_sol_reserves: Number(t.baseline_sol_reserves.toString()),
+        baseline_token_reserves: Number(t.baseline_token_reserves.toString()),
+        baseline_initialized: t.baseline_initialized,
+        total_stars: Number(t.total_stars.toString()),
+        star_sol_balance_sol: Number(t.star_sol_balance.toString()) / constants_1.LAMPORTS_PER_SOL,
+        creator_paid_out: t.creator_paid_out,
+        total_bought_back: Number(t.total_bought_back.toString()),
+        total_burned_from_buyback: Number(t.total_burned_from_buyback.toString()),
+        last_buyback_slot: Number(t.last_buyback_slot.toString()),
+        buyback_count: Number(t.buyback_count.toString()),
+    };
+};
+exports.getTreasuryState = getTreasuryState;
 //# sourceMappingURL=tokens.js.map

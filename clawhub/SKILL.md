@@ -1,6 +1,6 @@
 ---
 name: torch-liquidation-bot
-version: "10.5.2"
+version: "10.7.1"
 description: Autonomous vault-based liquidation keeper for Torch Market lending on Solana. Scans all migrated tokens for underwater loan positions using the SDK's bulk loan scanner (getAllLoanPositions), builds and executes liquidation transactions through a Torch Vault, and collects a 10% collateral bonus.
 license: MIT
 disable-model-invocation: true
@@ -66,11 +66,11 @@ metadata:
     install:
       - id: npm-torch-liquidation-bot
         kind: npm
-        package: torch-liquidation-bot@^10.5.2
+        package: torch-liquidation-bot@^10.7.1
         flags: []
         label: "Install Torch Liquidation Bot (npm, optional -- SDK is bundled in lib/torchsdk/ and bot source is bundled under lib/kit on clawhub)"
   author: torch-market
-  version: "10.5.2"
+  version: "10.7.1"
   clawhub: https://clawhub.ai/mrsirg97-rgb/torch-liquidation-bot
   kit-source: https://github.com/mrsirg97-rgb/torch-liquidation-kit
   sdk-source: https://github.com/mrsirg97-rgb/torchsdk
